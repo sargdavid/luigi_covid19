@@ -1,0 +1,155 @@
+---
+title: "Luigi's COVID-19 Data"
+output: html_notebook
+---
+
+Version: 3.0  
+Created: 9/6/2023  
+
+# Setup
+```{r setup}
+require(data.table)
+require(ggplot2)
+require(table1)
+```
+
+# Data
+## Demographics and clinical variables
+```{r}
+# dtdm <- fread("Data/COVID_19_RNA_Demo.csv")
+# dtdm <- fread("Data/COVID study Master sheet w ELISA data July 2023.csv")
+
+dt1 <- fread("Data/COVID study Master sheet w ELISA data July 2023-2.csv")
+# summary(dt1)
+```
+
+## Gene expressions
+NOTE: data contains both, coding and noncoding genes.  
+  
+```{r}
+dt2 <- fread("Data/gene_count.xls")
+
+rnaseq_meta <- data.table(sample_names = colnames(dt2)[2:58],
+                          rnaseq_cohort = sapply(strsplit(x = colnames(dt2)[2:58], 
+                                                          split = "_"), 
+                                                 function(x) x[1]),
+                          `Real ID` = sapply(strsplit(x = colnames(dt2)[2:58], 
+                                                      split = "_"), 
+                                             function(x) x[2]))
+rnaseq_meta
+
+real_id <- as.character(dt1$`Real ID`)
+```
+
+### IDs that are in RNA-seq but not in Clinical
+8 IDs  
+
+```{r}
+rnaseq_meta$`Real ID`[!(rnaseq_meta$`Real ID` %in% real_id)]
+```
+
+### IDs that are in Clinical but not in RNA-seq
+49 IDs  
+```{r}
+real_id[real_id %in% rnaseq_meta$`Real ID`]
+```
+
+# NOTE
+NOTE: Patient 7247980 does not have any clinical data but was COVID-positive and has RNA-seq data  
+
+```{r}
+head(dt2[, c(59,
+             which(rnaseq_meta$`Real ID` == "7247980") + 1), 
+         with  = FALSE])
+```
+
+# Format clinical variables
+```{r}
+dt1$Fake_ID <- NULL
+
+dt1$`Real ID` <- as.character(dt1$`Real ID`)
+dt1 <- merge(rnaseq_meta[, 2:3],
+             dt1,
+             by = "Real ID",
+             all = TRUE)
+dt1$rnaseq_cohort <- factor(dt1$rnaseq_cohort,
+                            levels = c("ctl",
+                                       "cov"))
+
+dt1$`Whole Blood` <- factor(dt1$`Whole Blood`,
+                            levels = unique(dt1$`Whole Blood`))
+
+dt1$Plasma <- factor(dt1$Plasma)
+
+dt1$`Study Group` <- factor(dt1$`Study Group`)
+
+dt1$`Inpatient=1, ER=2, OP=3` <- factor(dt1$`Inpatient=1, ER=2, OP=3`,
+                                        levels = c("COVID-Positive",
+                                                   1:3),
+                                        labels = c("COVID-Positive",
+                                                   "Inpatient",
+                                                   "ER",
+                                                   "OP"))
+
+# !!! CHECK THIS!!!
+dt1$Sex <- factor(dt1$Sex,
+                  levels = 0:1,
+                  labels = c("Female",
+                             "Male"))
+
+# !!! GET LABELS!!!
+dt1$Race <- factor(dt1$Race,
+                   levels = 0:4)
+
+dt1$`If BMI ?30 Obesity Class (I,II,III)` <- factor(dt1$`If BMI ?30 Obesity Class (I,II,III)`,
+                                                    levels = c("I",
+                                                               "II",
+                                                               "III"))
+
+dt1$Vaccinated <- factor(dt1$Vaccinated,
+                         levels = 0:1)
+
+dt1$`Dose #1` <- factor(dt1$`Dose #1`,
+                        levels = 0:1)
+
+dt1$`Dose #2` <- factor(dt1$`Dose #2`,
+                        levels = 0:1)
+
+# !!!GET LABELS!!!
+dt1$Booster <- factor(dt1$Booster,
+                      levels = c(0, 1, 9))
+
+dt1$`Critical Care` <- factor(dt1$`Critical Care`,
+                              levels = 0:1)
+
+dt1$Still_In_Hospital_08182023 <- is.na(as.numeric(dt1$LOS))
+dt1$LOS <- as.numeric(sapply(strsplit(x = dt1$LOS, 
+                                      split = " "), 
+                             function(x) x[1]))
+
+dt1$Expired <- factor(dt1$Expired,
+                      levels = 0:1)
+
+dt1$Wave <- factor(dt1$Wave,
+                   levels = c(1:4))
+
+dt1$`Smoking History (0,1,2)` <- factor(dt1$`Smoking History (0,1,2)`,
+                                        levels = 0:2)
+
+dt1$AnyDM <- factor(dt1$AnyDM,
+                    levels = 0:1)
+
+# summary(dt1)
+```
+
+# Table 1
+```{r}
+table1( ~.| AnyDM,
+       data = dt1[, c(2:23, 37)])
+```
+
+
+```{r}
+
+```
+
