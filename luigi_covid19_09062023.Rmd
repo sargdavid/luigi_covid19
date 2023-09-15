@@ -11,6 +11,7 @@ Created: 9/6/2023
 require(data.table)
 require(ggplot2)
 require(table1)
+require(DESeq2)
 ```
 
 # Data
@@ -39,6 +40,21 @@ rnaseq_meta <- data.table(sample_names = colnames(dt2)[2:58],
 rnaseq_meta
 
 real_id <- as.character(dt1$`Real ID`)
+```
+
+NOTE: the following file is corrupted. 
+```{r}
+# dt3 <- fread("Data/gene_count_09072023.txt")
+# dt3 <- readxl::read_xlsx("Data/gene_count_09072023.xlsx")
+
+dt3_samples <- strsplit(x = c("cov_464811	cov_8132930	cov_375729	cov_465716	cov_8133450	cov_652640	cov_8134377	cov_8134403	cov_659302	cov_8133455	cov_341512	cov_744193	cov_689663	cov_8134517	cov_593786	cov_570156	cov_73582	cov_145303	cov_699775	cov_507344	cov_162361	cov_7907555	ctl_8135049	ctl_627904	ctl_8134613	ctl_449249	ctl_5042442	ctl_5061837	ctl_6580256	ctl_4727076	ctl_11720128	ctl_5042447	ctl_568818	ctl_4697681	ctl_4747326	ctl_2168139	ctl_2363665	ctl_2121214	ctl_4886363	ctl_5005559	ctl_4722831	ctl_5137003	ctl_5172348	ctl_5107137	ctl_7247980	ctl_7215440a	ctl_5031909	cov_1379494	ctl_6937871	ctl_4781822	ctl_4734417	ctl_4959911	ctl_7215440b	ctl_1427090	ctl_4816944	ctl_6591621	ctl_784880"),
+                        split = "\t")[[1]]
+
+dt3_samples
+
+# CHECKPOINT
+rnaseq_meta$sample_names %in% dt3_samples
+# SAME SAMPLES!
 ```
 
 ### IDs that are in RNA-seq but not in Clinical
@@ -81,7 +97,21 @@ dt1$`Whole Blood` <- factor(dt1$`Whole Blood`,
 
 dt1$Plasma <- factor(dt1$Plasma)
 
-dt1$`Study Group` <- factor(dt1$`Study Group`)
+# COVID = 0/1
+dt1$`Study Group`[is.na(dt1$`Study Group`)] <- 2
+dt1$`Study Group` <- factor(dt1$`Study Group`,
+                            levels = 0:2,
+                            labels = c("No COVID",
+                                       "COVID",
+                                       "COVID Unknown"))
+
+# NOTE: not matching with RNA-seq
+table(clin = dt1$`Study Group`,
+      rna = dt1$rnaseq_cohort)
+#       rna
+# clin ctl cov
+#    0  26   0
+#    1   4  19
 
 dt1$`Inpatient=1, ER=2, OP=3` <- factor(dt1$`Inpatient=1, ER=2, OP=3`,
                                         levels = c("COVID-Positive",
@@ -91,15 +121,19 @@ dt1$`Inpatient=1, ER=2, OP=3` <- factor(dt1$`Inpatient=1, ER=2, OP=3`,
                                                    "ER",
                                                    "OP"))
 
-# !!! CHECK THIS!!!
 dt1$Sex <- factor(dt1$Sex,
                   levels = 0:1,
-                  labels = c("Female",
-                             "Male"))
+                  labels = c("Male",
+                             "Female"))
 
 # !!! GET LABELS!!!
 dt1$Race <- factor(dt1$Race,
-                   levels = 0:4)
+                   levels = 0:4,
+                   labels = c("White Non-Hispanic",
+                              "Hispanic",
+                              "Black",
+                              "Asian",
+                              "Other"))
 
 dt1$`If BMI ?30 Obesity Class (I,II,III)` <- factor(dt1$`If BMI ?30 Obesity Class (I,II,III)`,
                                                     levels = c("I",
@@ -136,20 +170,235 @@ dt1$Wave <- factor(dt1$Wave,
 dt1$`Smoking History (0,1,2)` <- factor(dt1$`Smoking History (0,1,2)`,
                                         levels = 0:2)
 
+dt1$AnyDM[is.na(dt1$AnyDM)] <- 2
 dt1$AnyDM <- factor(dt1$AnyDM,
-                    levels = 0:1)
+                    levels = 0:2,
+                    labels = c("No Diabetes",
+                               "Any Diabetes",
+                               "Diabetes Unknown"))
+
+# NA should be non-COVID patients - CHECK
+dt1$`WHO-OSCI D1` <- factor(dt1$`WHO-OSCI D1`,
+                            levels = 0:7)
+dt1$`WHO-OSCI D3` <- factor(dt1$`WHO-OSCI D3`,
+                            levels = 0:7)
+dt1$`WHO-OSCI D7` <- factor(dt1$`WHO-OSCI D7`,
+                            levels = 0:7)
+dt1$`WHO-OSCI D14` <- factor(dt1$`WHO-OSCI D14`,
+                             levels = 0:7)
+dt1$`WHO-OSCI D21` <- factor(dt1$`WHO-OSCI D21`,
+                             levels = 0:7)
+dt1$`WHO-OSCI D28` <- factor(dt1$`WHO-OSCI D28`,
+                             levels = 0:7)
 
 # summary(dt1)
 ```
 
 # Table 1
 ```{r}
-table1( ~.| AnyDM,
-       data = dt1[, c(2:23, 37)])
+table1( ~.| `Study Group` + AnyDM,
+       data = dt1[, c(2:23, 
+                      37, # AnyDM
+                      82:87)]) # WHO-OSCI
+```
+
+### WHO-OSCI over time
+```{r}
+tmp <- dt1[, c(1, 5, 82:87)]
+tmp <- melt.data.table(tmp,
+                       id.vars = c(1, 2),
+                       variable.name = "Day",
+                       value.name = "WHO_OSCI")
+tmp$Day <- factor(tmp$Day,
+                       levels = unique(tmp$Day))
+
+tmp <- tmp[!is.na(tmp$WHO_OSCI)]
+ggplot(tmp,
+       aes(x = Day,
+           y = WHO_OSCI,
+           group = `Real ID`,
+           color = `Real ID`)) +
+  facet_wrap(~ `Study Group`) +
+  geom_line(position = position_dodge(0.3)) +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+# Death
+## Death in COVID only vs Obese
+```{r}
+chisq.test(dt1$Expired[dt1$`Study Group` == "COVID"],
+           dt1$Obese[dt1$`Study Group` == "COVID"])
+
+addmargins(table(dt1$Expired[dt1$`Study Group` == "COVID"],
+                dt1$Obese[dt1$`Study Group` == "COVID"]))
+```
+
+## Death vs. COVID
+No significant difference
+```{r}
+dtm1 <- dt1[!is.na(Expired) &
+              `Study Group` != "Unknown", ]
+
+addmargins(table(Expired = dtm1$Expired,
+                 COVID = dtm1$`Study Group`))
+
+chisq.test(x = dtm1$`Study Group`,
+           y = dtm1$Expired)
+
+m1 <- glm(Expired ~ `Study Group`,
+          family = binomial,
+          data = droplevels(dtm1))
+summary(m1)
+```
+
+## Death vs. COVID | Diabetes
+No significant difference.  
+Model with interaction is worse.  
+  
+```{r}
+dtm2 <- dt1[!is.na(Expired) &
+              `Study Group` != "Unknown" &
+              AnyDM != "Diabetes Unknown", ]
+
+
+m2 <- glm(Expired ~ `Study Group` +
+            AnyDM,
+          family = binomial,
+          data = droplevels(dtm2))
+summary(m2)
+```
+
+## Death vs Critical Care
+Significant
+```{r}
+dtm3 <- dt1[!is.na(Expired) &
+              `Study Group` != "Unknown" &
+              !is.na(`Critical Care`), ]
+
+m3 <- glm(Expired ~ `Critical Care`,
+          family = binomial,
+          data = droplevels(dtm3))
+summary(m3)
+```
+
+## Death vs COVID, adjusted for critical care
+Both significant in additive model.  
+No significance in interaction model.
+```{r}
+dtm4 <- dt1[!is.na(Expired) &
+              AnyDM != "Diabetes Unknown" &
+              `Study Group` != "Unknown" &
+              !is.na(`Critical Care`), ]
+
+m4 <- glm(Expired ~ `Study Group` + `Critical Care`,
+          family = binomial,
+          data = droplevels(dtm4))
+summary(m4)
+
+m41 <- glm(Expired ~ `Study Group`*`Critical Care`,
+          family = binomial,
+          data = droplevels(dtm4))
+summary(m41)
+```
+
+## Death vs COVID, adjusted for DM
+No significance
+```{r}
+dtm5 <- dt1[!is.na(Expired) &
+              `Study Group` != "Unknown" &
+              AnyDM != "Diabetes Unknown", ]
+
+m5 <- glm(Expired ~ `Study Group` +
+            AnyDM,
+          family = binomial,
+          data = droplevels(dtm5))
+summary(m5)
+```
+
+## Death vs COVID, adjusted 
+```{r}
+dtm6 <- dt1[!is.na(Expired) &
+              `Study Group` != "Unknown" &
+              AnyDM != "Diabetes Unknown" &
+              !is.na(Age_Category), ]
+
+m6 <- glm(Expired ~ `Study Group` +
+            AnyDM +
+            Age_Category +
+            Sex +
+            Race +
+            BMI,
+          family = binomial,
+          data = droplevels(dtm6))
+summary(m6)
+```
+
+# New variable: DM+Obesity
+```{r}
+chisq.test(dt1$AnyDM,
+           dt1$Obese)
+```
+
+
+# ICU LOS
+```{r}
+summary(dt1$LOS)
+hist(dt1$LOS)
+hist(log2(dt1$LOS + 1))
+
+m2 <- lm(log2(LOS + 1) ~ AnyDM +
+           Age +
+           Sex +
+           Race +
+           BMI +
+           `Critical Care`,
+         family = binomial,
+         data = droplevels(dt1[!is.na(Expired) &
+                                 AnyDM != "Diabetes Unknown", ]))
+summary(m2)
+```
+
+# Critical care
+```{r}
+m3 <- glm(`Critical Care` ~ AnyDM +
+            Age +
+            Sex +
+            Race +
+            BMI,
+          family = binomial,
+          data = droplevels(dt1[!is.na(Expired) &
+                                  AnyDM != "Diabetes Unknown", ]))
+summary(m3)
+```
+
+# DESeq2
+```{r}
+rnaseq_meta$rnaseq_cohort <- factor(rnaseq_meta$rnaseq_cohort,
+                                    levels = c("ctl",
+                                               "cov"))
+tmp <- data.frame(dt2[, cov_464811:ctl_784880])
+rownames(tmp) <- dt2$gene_id
+
+dds <- DESeqDataSetFromMatrix(countData = dt2[, cov_464811:ctl_784880], 
+                              colData = rnaseq_meta,
+                              ~ rnaseq_cohort)
 ```
 
 
 ```{r}
+# dss <- estimateSizeFactors(dds, 
+#                            type = "iterate")
+
+deseq <- DESeq(dds)
+```
+
+```{r}
+res <- results(deseq)
+res[1:10, ]
+
+out <- data.table(gene_id = rownames(res),
+                  res)
 
 ```
 
