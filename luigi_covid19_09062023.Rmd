@@ -5,7 +5,17 @@ output: html_notebook
 
 Version: 3.0  
 Created: 9/6/2023  
+Last update: 9/22/2023
 
+Analysis datasets and copy of the Rmd are in Rutgers box:  
+https://rutgers.app.box.com/folder/227391194192  
+
+GitHub Repo:  
+https://github.com/sargdavid/luigi_covid19  
+  
+My GitHub Token (instead of password):  
+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  
+  
 # Setup
 ```{r setup}
 require(data.table)
@@ -21,9 +31,6 @@ Javier, 9/15/2023:
 # Data
 ## Clinical variables
 ```{r}
-# dtdm <- fread("Data/COVID_19_RNA_Demo.csv")
-# dtdm <- fread("Data/COVID study Master sheet w ELISA data July 2023.csv")
-
 dt_clin <- fread("Data/COVID study Master sheet w ELISA data July 2023-2.csv")
 ```
 
@@ -337,11 +344,6 @@ load("Data/rnaseq_meta.RData")
 # Analysis
 ## Table 1
 ```{r}
-# t1 <- table1( ~.| `Study Group` + AnyDM,
-#               data = dt_clin[, c(2:22, 
-#                                  36, # AnyDM
-#                                  81:86)]) # WHO-OSCI
-
 t1 <- table1( ~.| `Study Group` + AnyDM,
               data = dt_clin[, c(-1)])
 
@@ -357,6 +359,179 @@ write.table (t1 ,
              sep = ',')
 ```
 
+## Death
+### Death vs. COVID
+```{r}
+addmargins(table(Death = dt_clin$Expired,
+                 COVID = dt_clin$`Study Group`))
+```
+
+### Death vs DM,  COVID only 
+```{r}
+covid <- droplevels(dt_clin[`Study Group` == "COVID", ])
+
+chisq.test(covid$Expired,
+           covid$AnyDM)
+
+addmargins(table(Death = covid$Expired,
+                 AnyDM = covid$AnyDM))
+```
+
+### Death vs Obese, COVID only 
+```{r}
+chisq.test(dt_clin$Expired[dt_clin$`Study Group` == "COVID"],
+           dt_clin$Obese[dt_clin$`Study Group` == "COVID"])
+
+addmargins(table(Death = dt_clin$Expired[dt_clin$`Study Group` == "COVID"],
+                 Obese = dt_clin$Obese[dt_clin$`Study Group` == "COVID"]))
+```
+
+### Death vs BMI, COVID only 
+```{r}
+t.test(dt_clin$BMI[dt_clin$`Study Group` == "COVID"] ~ dt_clin$Expired[dt_clin$`Study Group` == "COVID"])
+
+ggplot(dt_clin[`Study Group` == "COVID", ],
+       aes(x = Expired,
+           y = BMI)) +
+  geom_boxplot(outlier.shape = "") +
+  geom_point(aes(group = `Real ID`),
+             shape = 21,
+             size = 2,
+             position = position_dodge(0.3)) +
+  ggtitle("COVID Patients Only") +
+  theme_bw()
+```
+
+### Death vs Critical Care
+Significant
+```{r}
+addmargins(table(Death = covid$Expired,
+                 CrCare = covid$`Critical Care`))
+
+m3 <- glm(Expired ~ `Critical Care`,
+          family = binomial,
+          data = covid)
+s3 <- summary(m3)
+s3$coefficients
+s3
+exp(s3$coefficients[, 1])
+
+chisq.test(covid$Expired,
+           covid$`Critical Care`)
+```
+
+#### CONTINUE HERE!!! 9/22/2023
+
+### Death vs. COVID | Diabetes
+No significant difference.  
+Model with interaction is worse.  
+  
+```{r}
+dtm2 <- dt_clin[!is.na(Expired) &
+              `Study Group` != "Unknown" &
+              AnyDM != "Diabetes Unknown", ]
+
+
+m2 <- glm(Expired ~ `Study Group` +
+            AnyDM,
+          family = binomial,
+          data = droplevels(dtm2))
+summary(m2)
+```
+
+
+
+### Death vs COVID, adjusted for critical care
+Both significant in additive model.  
+No significance in interaction model.
+```{r}
+dtm4 <- dt_clin[!is.na(Expired) &
+              AnyDM != "Diabetes Unknown" &
+              `Study Group` != "Unknown" &
+              !is.na(`Critical Care`), ]
+
+m4 <- glm(Expired ~ `Study Group` + `Critical Care`,
+          family = binomial,
+          data = droplevels(dtm4))
+summary(m4)
+
+m41 <- glm(Expired ~ `Study Group`*`Critical Care`,
+          family = binomial,
+          data = droplevels(dtm4))
+summary(m41)
+```
+
+### Death vs COVID, adjusted for DM
+No significance
+```{r}
+dtm5 <- dt_clin[!is.na(Expired) &
+              `Study Group` != "Unknown" &
+              AnyDM != "Diabetes Unknown", ]
+
+m5 <- glm(Expired ~ `Study Group` +
+            AnyDM,
+          family = binomial,
+          data = droplevels(dtm5))
+summary(m5)
+```
+
+### Death vs COVID, adjusted 
+```{r}
+dtm6 <- dt_clin[!is.na(Expired) &
+              `Study Group` != "Unknown" &
+              AnyDM != "Diabetes Unknown" &
+              !is.na(Age_Category), ]
+
+m6 <- glm(Expired ~ `Study Group` +
+            AnyDM +
+            Age_Category +
+            Sex +
+            Race +
+            BMI,
+          family = binomial,
+          data = droplevels(dtm6))
+summary(m6)
+```
+
+### New variable: DM+Obesity
+```{r}
+chisq.test(dt_clin$AnyDM,
+           dt_clin$Obese)
+```
+
+## ICU
+### ICU LOS
+```{r}
+summary(dt_clin$LOS)
+hist(dt_clin$LOS)
+hist(log2(dt_clin$LOS + 1))
+
+m2 <- lm(log2(LOS + 1) ~ AnyDM +
+           Age +
+           Sex +
+           Race +
+           BMI +
+           `Critical Care`,
+         family = binomial,
+         data = droplevels(dt_clin[!is.na(Expired) &
+                                 AnyDM != "Diabetes Unknown", ]))
+summary(m2)
+```
+
+### Critical care
+```{r}
+m3 <- glm(`Critical Care` ~ AnyDM +
+            Age +
+            Sex +
+            Race +
+            BMI,
+          family = binomial,
+          data = droplevels(dt_clin[!is.na(Expired) &
+                                  AnyDM != "Diabetes Unknown", ]))
+summary(m3)
+```
+
+## WHO-OSCI
 ### WHO-OSCI over time
 ```{r}
 tmp <- dt_clin[, c(1, 5, 37, 82:87)]
@@ -381,176 +556,8 @@ ggplot(tmp,
                                    hjust = 1))
 ```
 
-# Death
-```{r}
-addmargins(table(Death = dt_clin$Expired,
-                 COVID = dt_clin$`Study Group`))
-```
-
-## Death in COVID only vs DM
-```{r}
-covid <- droplevels(dt_clin[`Study Group` == "COVID", ])
-
-chisq.test(covid$Expired,
-           covid$AnyDM)
-
-addmargins(table(Death = covid$Expired,
-                 AnyDM = covid$AnyDM))
-```
-
-## Death in COVID only vs Obese
-```{r}
-chisq.test(dt_clin$Expired[dt_clin$`Study Group` == "COVID"],
-           dt_clin$Obese[dt_clin$`Study Group` == "COVID"])
-
-addmargins(table(Death = dt_clin$Expired[dt_clin$`Study Group` == "COVID"],
-                 Obese = dt_clin$Obese[dt_clin$`Study Group` == "COVID"]))
-```
-
-## Death in COVID only vs BMI
-```{r}
-t.test(dt_clin$BMI[dt_clin$`Study Group` == "COVID"] ~ dt_clin$Expired[dt_clin$`Study Group` == "COVID"])
-
-ggplot(dt_clin[`Study Group` == "COVID", ],
-       aes(x = Expired,
-           y = BMI)) +
-  geom_boxplot(outlier.shape = "") +
-  geom_point(aes(group = `Real ID`),
-             shape = 21,
-             size = 2,
-             position = position_dodge(0.3)) +
-  ggtitle("COVID Patients Only") +
-  theme_bw()
-```
-
-## Death vs Critical Care
-Significant
-```{r}
-addmargins(table(Death = covid$Expired,
-                 CrCare = covid$`Critical Care`))
-
-m3 <- glm(Expired ~ `Critical Care`,
-          family = binomial,
-          data = covid)
-s3 <- summary(m3)
-s3$coefficients
-s3
-exp(s3$coefficients[, 1])
-
-chisq.test(covid$Expired,
-           covid$`Critical Care`)
-```
-
-## Death vs. COVID | Diabetes
-No significant difference.  
-Model with interaction is worse.  
-  
-```{r}
-dtm2 <- dt_clin[!is.na(Expired) &
-              `Study Group` != "Unknown" &
-              AnyDM != "Diabetes Unknown", ]
-
-
-m2 <- glm(Expired ~ `Study Group` +
-            AnyDM,
-          family = binomial,
-          data = droplevels(dtm2))
-summary(m2)
-```
-
-
-
-## Death vs COVID, adjusted for critical care
-Both significant in additive model.  
-No significance in interaction model.
-```{r}
-dtm4 <- dt_clin[!is.na(Expired) &
-              AnyDM != "Diabetes Unknown" &
-              `Study Group` != "Unknown" &
-              !is.na(`Critical Care`), ]
-
-m4 <- glm(Expired ~ `Study Group` + `Critical Care`,
-          family = binomial,
-          data = droplevels(dtm4))
-summary(m4)
-
-m41 <- glm(Expired ~ `Study Group`*`Critical Care`,
-          family = binomial,
-          data = droplevels(dtm4))
-summary(m41)
-```
-
-## Death vs COVID, adjusted for DM
-No significance
-```{r}
-dtm5 <- dt_clin[!is.na(Expired) &
-              `Study Group` != "Unknown" &
-              AnyDM != "Diabetes Unknown", ]
-
-m5 <- glm(Expired ~ `Study Group` +
-            AnyDM,
-          family = binomial,
-          data = droplevels(dtm5))
-summary(m5)
-```
-
-## Death vs COVID, adjusted 
-```{r}
-dtm6 <- dt_clin[!is.na(Expired) &
-              `Study Group` != "Unknown" &
-              AnyDM != "Diabetes Unknown" &
-              !is.na(Age_Category), ]
-
-m6 <- glm(Expired ~ `Study Group` +
-            AnyDM +
-            Age_Category +
-            Sex +
-            Race +
-            BMI,
-          family = binomial,
-          data = droplevels(dtm6))
-summary(m6)
-```
-
-# New variable: DM+Obesity
-```{r}
-chisq.test(dt_clin$AnyDM,
-           dt_clin$Obese)
-```
-
-
-# ICU LOS
-```{r}
-summary(dt_clin$LOS)
-hist(dt_clin$LOS)
-hist(log2(dt_clin$LOS + 1))
-
-m2 <- lm(log2(LOS + 1) ~ AnyDM +
-           Age +
-           Sex +
-           Race +
-           BMI +
-           `Critical Care`,
-         family = binomial,
-         data = droplevels(dt_clin[!is.na(Expired) &
-                                 AnyDM != "Diabetes Unknown", ]))
-summary(m2)
-```
-
-# Critical care
-```{r}
-m3 <- glm(`Critical Care` ~ AnyDM +
-            Age +
-            Sex +
-            Race +
-            BMI,
-          family = binomial,
-          data = droplevels(dt_clin[!is.na(Expired) &
-                                  AnyDM != "Diabetes Unknown", ]))
-summary(m3)
-```
-
-# DESeq2
+## RNA-seq
+### DESeq2
 ```{r}
 rnaseq_meta$rnaseq_cohort <- factor(rnaseq_meta$rnaseq_cohort,
                                     levels = c("ctl",
@@ -578,5 +585,10 @@ res[1:10, ]
 out <- data.table(gene_id = rownames(res),
                   res)
 
+```
+
+# Session
+```{r}
+sessionInfo()
 ```
 
