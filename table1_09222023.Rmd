@@ -1,0 +1,25 @@
+---
+title: "RWJ COVID-19 Table 1"
+output: html_notebook
+---
+
+# Setup
+```{r}
+require(data.table)
+require(table1)
+```
+
+# Load data
+```{r}
+load("Data/dt_clin.RData")
+```
+
+# Table 1
+In Subcolumn, 0 = No Diabetes, 1 = Any Diabetes  
+  
+```{r}
+t1 <- table1( ~.| `Study Group` + AnyDM,
+              data = dt_clin[, c(-1)])
+
+t1
+```

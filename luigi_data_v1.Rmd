@@ -37,22 +37,23 @@ I also asked the lab for more samples, will see what they say.
 require(data.table)
 require(ggplot2)
 require(table1)
-require(randomForest)
-require(randomForestExplainer)
-require(rpart)
+# require(randomForest)
+# require(randomForestExplainer)
+# require(rpart)
 ```
 
 # Load data
 ```{r}
-dt1 <- fread("COVID_19_RNA_Demo.csv")
-
-# Rename
-colnames(dt1)[colnames(dt1) == "Rheum/ CONNECTIVE TISSUE DISEASE"] <- "Rheum"
-colnames(dt1)[colnames(dt1) == "Smoking History (0,1,2)"] <- "Smoking"
+getwd()
+dt1 <- fread("Data/COVID_19_RNA_Demo.csv")
 ```
 
 # Convert variables
 ```{r}
+# Rename
+colnames(dt1)[colnames(dt1) == "Rheum/ CONNECTIVE TISSUE DISEASE"] <- "Rheum"
+colnames(dt1)[colnames(dt1) == "Smoking History (0,1,2)"] <- "Smoking"
+
 which(colnames(dt1) == "If BMI ?30 Obesity Class (I,II,III)")
 which(colnames(dt1) == "Prophylactic Anticoagulation")
 which(colnames(dt1) == "Hyperlipidemia")

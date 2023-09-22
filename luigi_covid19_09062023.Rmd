@@ -14,120 +14,51 @@ require(table1)
 require(DESeq2)
 ```
 
+Javier, 9/15/2023:  
+1. Build survival model using LOS as dates. Assuming all death are in-hospital, end of LOS.  
+
+
 # Data
-## Demographics and clinical variables
+## Clinical variables
 ```{r}
 # dtdm <- fread("Data/COVID_19_RNA_Demo.csv")
 # dtdm <- fread("Data/COVID study Master sheet w ELISA data July 2023.csv")
 
-dt1 <- fread("Data/COVID study Master sheet w ELISA data July 2023-2.csv")
-# summary(dt1)
+dt_clin <- fread("Data/COVID study Master sheet w ELISA data July 2023-2.csv")
 ```
 
-## Gene expressions
-NOTE: data contains both, coding and noncoding genes.  
-  
+### Format clinical variables
 ```{r}
-dt2 <- fread("Data/gene_count.xls")
+dt_clin$`Real ID` <- as.character(dt_clin$`Real ID`)
 
-rnaseq_meta <- data.table(sample_names = colnames(dt2)[2:58],
-                          rnaseq_cohort = sapply(strsplit(x = colnames(dt2)[2:58], 
-                                                          split = "_"), 
-                                                 function(x) x[1]),
-                          `Real ID` = sapply(strsplit(x = colnames(dt2)[2:58], 
-                                                      split = "_"), 
-                                             function(x) x[2]))
-rnaseq_meta
+dt_clin$`Whole Blood` <- factor(dt_clin$`Whole Blood`,
+                            levels = unique(dt_clin$`Whole Blood`))
 
-real_id <- as.character(dt1$`Real ID`)
-```
-
-NOTE: the following file is corrupted. 
-```{r}
-# dt3 <- fread("Data/gene_count_09072023.txt")
-# dt3 <- readxl::read_xlsx("Data/gene_count_09072023.xlsx")
-
-dt3_samples <- strsplit(x = c("cov_464811	cov_8132930	cov_375729	cov_465716	cov_8133450	cov_652640	cov_8134377	cov_8134403	cov_659302	cov_8133455	cov_341512	cov_744193	cov_689663	cov_8134517	cov_593786	cov_570156	cov_73582	cov_145303	cov_699775	cov_507344	cov_162361	cov_7907555	ctl_8135049	ctl_627904	ctl_8134613	ctl_449249	ctl_5042442	ctl_5061837	ctl_6580256	ctl_4727076	ctl_11720128	ctl_5042447	ctl_568818	ctl_4697681	ctl_4747326	ctl_2168139	ctl_2363665	ctl_2121214	ctl_4886363	ctl_5005559	ctl_4722831	ctl_5137003	ctl_5172348	ctl_5107137	ctl_7247980	ctl_7215440a	ctl_5031909	cov_1379494	ctl_6937871	ctl_4781822	ctl_4734417	ctl_4959911	ctl_7215440b	ctl_1427090	ctl_4816944	ctl_6591621	ctl_784880"),
-                        split = "\t")[[1]]
-
-dt3_samples
-
-# CHECKPOINT
-rnaseq_meta$sample_names %in% dt3_samples
-# SAME SAMPLES!
-```
-
-### IDs that are in RNA-seq but not in Clinical
-8 IDs  
-
-```{r}
-rnaseq_meta$`Real ID`[!(rnaseq_meta$`Real ID` %in% real_id)]
-```
-
-### IDs that are in Clinical but not in RNA-seq
-49 IDs  
-```{r}
-real_id[real_id %in% rnaseq_meta$`Real ID`]
-```
-
-# NOTE
-NOTE: Patient 7247980 does not have any clinical data but was COVID-positive and has RNA-seq data  
-
-```{r}
-head(dt2[, c(59,
-             which(rnaseq_meta$`Real ID` == "7247980") + 1), 
-         with  = FALSE])
-```
-
-# Format clinical variables
-```{r}
-dt1$Fake_ID <- NULL
-
-dt1$`Real ID` <- as.character(dt1$`Real ID`)
-dt1 <- merge(rnaseq_meta[, 2:3],
-             dt1,
-             by = "Real ID",
-             all = TRUE)
-dt1$rnaseq_cohort <- factor(dt1$rnaseq_cohort,
-                            levels = c("ctl",
-                                       "cov"))
-
-dt1$`Whole Blood` <- factor(dt1$`Whole Blood`,
-                            levels = unique(dt1$`Whole Blood`))
-
-dt1$Plasma <- factor(dt1$Plasma)
+dt_clin$Plasma <- factor(dt_clin$Plasma)
 
 # COVID = 0/1
-dt1$`Study Group`[is.na(dt1$`Study Group`)] <- 2
-dt1$`Study Group` <- factor(dt1$`Study Group`,
-                            levels = 0:2,
+dt_clin$`Study Group` <- factor(dt_clin$`Study Group`,
+                            levels = 0:1,
                             labels = c("No COVID",
-                                       "COVID",
-                                       "COVID Unknown"))
+                                       "COVID"))
 
-# NOTE: not matching with RNA-seq
-table(clin = dt1$`Study Group`,
-      rna = dt1$rnaseq_cohort)
-#       rna
-# clin ctl cov
-#    0  26   0
-#    1   4  19
+# Remove 1 patient marked 'COVID-Positive'
+dt_clin[`Inpatient=1, ER=2, OP=3` == "COVID-Positive",]
+dt_clin <- dt_clin[`Inpatient=1, ER=2, OP=3` != "COVID-Positive", ]
 
-dt1$`Inpatient=1, ER=2, OP=3` <- factor(dt1$`Inpatient=1, ER=2, OP=3`,
-                                        levels = c("COVID-Positive",
-                                                   1:3),
-                                        labels = c("COVID-Positive",
-                                                   "Inpatient",
+dt_clin$`Inpatient=1, ER=2, OP=3` <- factor(dt_clin$`Inpatient=1, ER=2, OP=3`,
+                                        levels = 1:3,
+                                        labels = c("Inpatient",
                                                    "ER",
                                                    "OP"))
 
-dt1$Sex <- factor(dt1$Sex,
+dt_clin$Sex <- factor(dt_clin$Sex,
                   levels = 0:1,
                   labels = c("Male",
                              "Female"))
 
 # !!! GET LABELS!!!
-dt1$Race <- factor(dt1$Race,
+dt_clin$Race <- factor(dt_clin$Race,
                    levels = 0:4,
                    labels = c("White Non-Hispanic",
                               "Hispanic",
@@ -135,78 +66,302 @@ dt1$Race <- factor(dt1$Race,
                               "Asian",
                               "Other"))
 
-dt1$`If BMI ?30 Obesity Class (I,II,III)` <- factor(dt1$`If BMI ?30 Obesity Class (I,II,III)`,
+dt_clin$`If BMI ?30 Obesity Class (I,II,III)` <- factor(dt_clin$`If BMI ?30 Obesity Class (I,II,III)`,
                                                     levels = c("I",
                                                                "II",
                                                                "III"))
 
-dt1$Vaccinated <- factor(dt1$Vaccinated,
+dt_clin$Vaccinated <- factor(dt_clin$Vaccinated,
                          levels = 0:1)
 
-dt1$`Dose #1` <- factor(dt1$`Dose #1`,
+dt_clin$`Dose #1` <- factor(dt_clin$`Dose #1`,
                         levels = 0:1)
 
-dt1$`Dose #2` <- factor(dt1$`Dose #2`,
+dt_clin$`Dose #2` <- factor(dt_clin$`Dose #2`,
                         levels = 0:1)
 
 # !!!GET LABELS!!!
-dt1$Booster <- factor(dt1$Booster,
+dt_clin$Booster <- factor(dt_clin$Booster,
                       levels = c(0, 1, 9))
 
-dt1$`Critical Care` <- factor(dt1$`Critical Care`,
+dt_clin$`Critical Care` <- factor(dt_clin$`Critical Care`,
                               levels = 0:1)
 
-dt1$Still_In_Hospital_08182023 <- is.na(as.numeric(dt1$LOS))
-dt1$LOS <- as.numeric(sapply(strsplit(x = dt1$LOS, 
+dt_clin$Still_In_Hospital_08182023 <- is.na(as.numeric(dt_clin$LOS))
+dt_clin$LOS <- as.numeric(sapply(strsplit(x = dt_clin$LOS, 
                                       split = " "), 
                              function(x) x[1]))
 
-dt1$Expired <- factor(dt1$Expired,
+dt_clin$Expired <- factor(dt_clin$Expired,
                       levels = 0:1)
 
-dt1$Wave <- factor(dt1$Wave,
+dt_clin$Wave <- factor(dt_clin$Wave,
                    levels = c(1:4))
 
-dt1$`Smoking History (0,1,2)` <- factor(dt1$`Smoking History (0,1,2)`,
+# !!! GET LABELS!!!
+dt_clin$`Smoking History (0,1,2)` <- factor(dt_clin$`Smoking History (0,1,2)`,
                                         levels = 0:2)
 
-dt1$AnyDM[is.na(dt1$AnyDM)] <- 2
-dt1$AnyDM <- factor(dt1$AnyDM,
-                    levels = 0:2,
-                    labels = c("No Diabetes",
-                               "Any Diabetes",
-                               "Diabetes Unknown"))
+# !!! GET LABELS!!!
+dt_clin$Age_Category <- factor(dt_clin$Age_Category,
+                               levels = 0:4)
+
+# Co-diagnoses/pre-existing conditions
+dt_clin$MI <- factor(dt_clin$MI)
+dt_clin$HF <- factor(dt_clin$HF)
+dt_clin$PVD <- factor(dt_clin$PVD)
+dt_clin$CVD <- factor(dt_clin$CVD)
+dt_clin$Dementia <- factor(dt_clin$Dementia)
+dt_clin$COPD <- factor(dt_clin$COPD)
+dt_clin$`Rheum/ CONNECTIVE TISSUE DISEASE` <- factor(dt_clin$`Rheum/ CONNECTIVE TISSUE DISEASE`)
+dt_clin$PUD <- factor(dt_clin$PUD)
+dt_clin$mliverd <- factor(dt_clin$mliverd)
+dt_clin$DiabNC <- factor(dt_clin$DiabNC)
+dt_clin$DiabC <- factor(dt_clin$DiabNC)
+dt_clin$AnyDM <- factor(dt_clin$AnyDM)
+dt_clin$Hemoplegia <- factor(dt_clin$Hemoplegia)
+dt_clin$RenalD <- factor(dt_clin$RenalD)
+dt_clin$Cancer <- factor(dt_clin$Cancer)
+dt_clin$msliver <- factor(dt_clin$msliver)
+dt_clin$MetaCancer <- factor(dt_clin$MetaCancer)
+dt_clin$AIDS <- factor(dt_clin$AIDS)
+dt_clin$HTN <- factor(dt_clin$HTN)
+dt_clin$Obese <- factor(dt_clin$Obese)
+
+# Medications
+dt_clin$tocilizumab <- factor(dt_clin$tocilizumab)
+dt_clin$remdesivir <- factor(dt_clin$remdesivir)
+dt_clin$dexamethasone <- factor(dt_clin$dexamethasone)
+dt_clin$methylprednisolone <- factor(dt_clin$methylprednisolone)
+dt_clin$prednisone <- factor(dt_clin$prednisone)
+dt_clin$hydrocortisone <- factor(dt_clin$hydrocortisone)
+dt_clin$azithromycin <- factor(dt_clin$azithromycin)
+dt_clin$hydroxychloroquine <- factor(dt_clin$hydroxychloroquine)
+dt_clin$regeneron <- factor(dt_clin$regeneron)
+dt_clin$ACEis <- factor(dt_clin$ACEis)
+dt_clin$ARBs <- factor(dt_clin$ARBs)
+dt_clin$ARNIs <- factor(dt_clin$ARNIs)
+dt_clin$Insulin <- factor(dt_clin$Insulin)
+dt_clin$Metformin <- factor(dt_clin$Metformin)
+dt_clin$Glimepiride <- factor(dt_clin$Glimepiride)
+dt_clin$Glipizide <- factor(dt_clin$Glipizide)
+dt_clin$Sitagliptin <- factor(dt_clin$Sitagliptin)
+dt_clin$`Full Dose Anticoagulation` <- factor(dt_clin$`Full Dose Anticoagulation`)
+dt_clin$`Prophylactic Anticoagulation` <- factor(dt_clin$`Prophylactic Anticoagulation`)
+
+# Lab work
+## NOTE: set correct values for LOQ/LOD! Converted to NAs for now
+dt_clin$HbA1c <- as.numeric(dt_clin$HbA1c)
+dt_clin$Vit_D_level <- as.numeric(dt_clin$Vit_D_level)
+dt_clin$ALT <- as.numeric(dt_clin$ALT)
+dt_clin$AST <- as.numeric(dt_clin$AST)
+dt_clin$`hs-CRP` <- as.numeric(dt_clin$`hs-CRP`)
+dt_clin$CRP <- as.numeric(dt_clin$CRP)
+dt_clin$Fibrinogen <- as.numeric(dt_clin$Fibrinogen)
+dt_clin$`D-Dimer` <- as.numeric(dt_clin$`D-Dimer`)
+dt_clin$ESR <- as.numeric(dt_clin$ESR)
+dt_clin$Ferritin <- as.numeric(dt_clin$Ferritin)
+dt_clin$LDH <- as.numeric(dt_clin$LDH)
+dt_clin$`Lactic Acid` <- as.numeric(dt_clin$`Lactic Acid`)
+dt_clin$PCT <- as.numeric(dt_clin$PCT)
+dt_clin$`Glucose Lvl` <- as.numeric(dt_clin$`Glucose Lvl`)
+dt_clin$Screat <- as.numeric(dt_clin$Screat)
+
+# Diagnoses
+dt_clin$Hyperlipidemia <- factor(dt_clin$Hyperlipidemia)
+dt_clin$`# Metabolic Syndrome Criteria` <- factor(dt_clin$`# Metabolic Syndrome Criteria`)
 
 # NA should be non-COVID patients - CHECK
-dt1$`WHO-OSCI D1` <- factor(dt1$`WHO-OSCI D1`,
+dt_clin$`WHO-OSCI D1` <- factor(dt_clin$`WHO-OSCI D1`,
                             levels = 0:7)
-dt1$`WHO-OSCI D3` <- factor(dt1$`WHO-OSCI D3`,
+dt_clin$`WHO-OSCI D3` <- factor(dt_clin$`WHO-OSCI D3`,
                             levels = 0:7)
-dt1$`WHO-OSCI D7` <- factor(dt1$`WHO-OSCI D7`,
+dt_clin$`WHO-OSCI D7` <- factor(dt_clin$`WHO-OSCI D7`,
                             levels = 0:7)
-dt1$`WHO-OSCI D14` <- factor(dt1$`WHO-OSCI D14`,
+dt_clin$`WHO-OSCI D14` <- factor(dt_clin$`WHO-OSCI D14`,
                              levels = 0:7)
-dt1$`WHO-OSCI D21` <- factor(dt1$`WHO-OSCI D21`,
+dt_clin$`WHO-OSCI D21` <- factor(dt_clin$`WHO-OSCI D21`,
                              levels = 0:7)
-dt1$`WHO-OSCI D28` <- factor(dt1$`WHO-OSCI D28`,
+dt_clin$`WHO-OSCI D28` <- factor(dt_clin$`WHO-OSCI D28`,
                              levels = 0:7)
+dt_clin$`WHO-OSCI DISCHARGE` <- factor(dt_clin$`WHO-OSCI DISCHARGE`)
 
-# summary(dt1)
+# Protein columns have no data - need to merge with another file. Remove last 21 columns.
+dt_clin <- dt_clin[, Fake_ID:`WHO-OSCI DISCHARGE`]
 ```
 
-# Table 1
 ```{r}
-table1( ~.| `Study Group` + AnyDM,
-       data = dt1[, c(2:23, 
-                      37, # AnyDM
-                      82:87)]) # WHO-OSCI
+summary(dt_clin)
+```
+
+## Proteins
+```{r}
+dt_elisa <- fread("Data/COVID study Master sheet w ELISA data July 2023-3.csv")
+```
+
+### Check matching IDs
+```{r}
+# There are 4 duplicated IDs
+dt_elisa[`Sample ID` %in% `Sample ID`[which(duplicated(`Sample ID`))]]
+
+# FIX THIS! 
+# For now, keep 1 of 2 samples
+dt_elisa <- dt_elisa[!(`Relabeled ID` %in% c("P122",
+                                             "P38",
+                                             "P2",
+                                             "P120")), ]
+
+# NOTE: checked other types of ID matches - no good
+# dt_elisa$`Sample ID`[!(dt_elisa$`Sample ID` %in% dt_clin$Fake_ID)]
+# dt_elisa$`Relabeled ID`[!(dt_elisa$`Relabeled ID` %in% dt_clin$`Real ID`)]
+# dt_elisa$`Relabeled ID`[!(dt_elisa$`Relabeled ID` %in% dt_clin$Fake_ID)]
+
+dt_elisa$`Sample ID`[!(dt_elisa$`Sample ID` %in% dt_clin$`Real ID`)]
+
+length(unique(dt_elisa$`Sample ID`))
+```
+
+### Merge matching Real IDs
+```{r}
+dt_elisa$`Relabeled ID` <- NULL
+names(dt_elisa)[1] <- "Real ID"
+
+dt_clin$Fake_ID <- NULL
+
+dt_clin <- merge(dt_clin,
+                 dt_elisa,
+                 by = "Real ID",
+                 all.x = TRUE)
+```
+
+## Gene expressions
+NOTE: data contains both, coding and noncoding genes.  
+  
+### First RNA-seq file
+```{r}
+dt2 <- fread("Data/gene_count.xls")
+
+rnaseq_meta1 <- data.table(sample_names = colnames(dt2)[2:58],
+                           rnaseq_cohort = sapply(strsplit(x = colnames(dt2)[2:58], 
+                                                           split = "_"), 
+                                                  function(x) x[1]),
+                           `Real ID` = sapply(strsplit(x = colnames(dt2)[2:58], 
+                                                       split = "_"), 
+                                              function(x) x[2]))
+rnaseq_meta1
+```
+
+### Second RNA-seq file
+```{r}
+dt3 <- fread("Data/gene_count_Additional.txt")
+
+rnaseq_meta2 <- data.table(sample_names = names(dt3)[2:46],
+                           rnaseq_cohort = "",
+                           `Real ID` = gsub(pattern = "LB", 
+                                            x = names(dt3)[2:46],
+                                            replacement = ""))
+rnaseq_meta2
+```
+
+### Merge RNA-seq meta files
+```{r}
+rnaseq_meta <- rbindlist(list(rnaseq_meta1,
+                              rnaseq_meta2))
+length(unique(rnaseq_meta$`Real ID`))
+# Same as number of rows, hence, all unique sample IDs
+
+rnaseq_meta$rnaseq_cohort <- NULL
+```
+
+### Merge RNA-seq files
+First 10 columns are gene info, the other 102 columns are the samples.
+```{r}
+dt_rna <- merge(dt2,
+                dt3,
+                by = c("gene_name",
+                       "gene_id",
+                       "gene_chr",
+                       "gene_start",
+                       "gene_end",
+                       "gene_strand",
+                       "gene_length",
+                       "gene_biotype",
+                       "gene_description",
+                       "tf_family"))
+```
+
+### IDs that are in RNA-seq but not in Clinical
+10 IDs  
+```{r}
+id_no_clin <- rnaseq_meta$`Real ID`[!(rnaseq_meta$`Real ID` %in% dt_clin$`Real ID`)]
+id_no_clin
+```
+
+### IDs that are in Clinical but not in RNA-seq
+91 IDs  
+```{r}
+id_no_rna <- dt_clin$`Real ID`[!(dt_clin$`Real ID` %in% rnaseq_meta$`Real ID`)]
+id_no_rna 
+```
+
+## Save data
+```{r}
+save(dt_clin,
+     file = "Data/dt_clin.RData")
+
+save(dt_rna,
+     file = "Data/dt_rna.RData")
+
+save(rnaseq_meta,
+     file = "Data/rnaseq_meta.RData")
+```
+
+## Clean
+```{r}
+rm(list = ls())
+
+# rm(list = ls()[!ls() %in% c("dt_clin",
+#                             "dt_rna",
+#                             "rnaseq_meta")])
+
+gc()
+```
+
+# Reload data
+```{r}
+load("Data/dt_clin.RData")
+load("Data/dt_rna.RData")
+load("Data/rnaseq_meta.RData")
+```
+
+# Analysis
+## Table 1
+```{r}
+# t1 <- table1( ~.| `Study Group` + AnyDM,
+#               data = dt_clin[, c(2:22, 
+#                                  36, # AnyDM
+#                                  81:86)]) # WHO-OSCI
+
+t1 <- table1( ~.| `Study Group` + AnyDM,
+              data = dt_clin[, c(-1)])
+
+t1
+```
+
+```{r}
+write.table (t1 , 
+             file = "Output/table1.csv",
+             col.names = TRUE, 
+             row.names = FALSE,
+             append = TRUE,
+             sep = ',')
 ```
 
 ### WHO-OSCI over time
 ```{r}
-tmp <- dt1[, c(1, 5, 82:87)]
+tmp <- dt_clin[, c(1, 5, 37, 82:87)]
 tmp <- melt.data.table(tmp,
-                       id.vars = c(1, 2),
+                       id.vars = c(1:3),
                        variable.name = "Day",
                        value.name = "WHO_OSCI")
 tmp$Day <- factor(tmp$Day,
@@ -218,38 +373,72 @@ ggplot(tmp,
            y = WHO_OSCI,
            group = `Real ID`,
            color = `Real ID`)) +
-  facet_wrap(~ `Study Group`) +
+  facet_wrap(~ AnyDM) +
   geom_line(position = position_dodge(0.3)) +
   theme_bw() +
-  theme(legend.position = "none")
+  theme(legend.position = "none") +
+  theme(axis.text.x = element_text(angle = 45,
+                                   hjust = 1))
 ```
 
 # Death
-## Death in COVID only vs Obese
 ```{r}
-chisq.test(dt1$Expired[dt1$`Study Group` == "COVID"],
-           dt1$Obese[dt1$`Study Group` == "COVID"])
-
-addmargins(table(dt1$Expired[dt1$`Study Group` == "COVID"],
-                dt1$Obese[dt1$`Study Group` == "COVID"]))
+addmargins(table(Death = dt_clin$Expired,
+                 COVID = dt_clin$`Study Group`))
 ```
 
-## Death vs. COVID
-No significant difference
+## Death in COVID only vs DM
 ```{r}
-dtm1 <- dt1[!is.na(Expired) &
-              `Study Group` != "Unknown", ]
+covid <- droplevels(dt_clin[`Study Group` == "COVID", ])
 
-addmargins(table(Expired = dtm1$Expired,
-                 COVID = dtm1$`Study Group`))
+chisq.test(covid$Expired,
+           covid$AnyDM)
 
-chisq.test(x = dtm1$`Study Group`,
-           y = dtm1$Expired)
+addmargins(table(Death = covid$Expired,
+                 AnyDM = covid$AnyDM))
+```
 
-m1 <- glm(Expired ~ `Study Group`,
+## Death in COVID only vs Obese
+```{r}
+chisq.test(dt_clin$Expired[dt_clin$`Study Group` == "COVID"],
+           dt_clin$Obese[dt_clin$`Study Group` == "COVID"])
+
+addmargins(table(Death = dt_clin$Expired[dt_clin$`Study Group` == "COVID"],
+                 Obese = dt_clin$Obese[dt_clin$`Study Group` == "COVID"]))
+```
+
+## Death in COVID only vs BMI
+```{r}
+t.test(dt_clin$BMI[dt_clin$`Study Group` == "COVID"] ~ dt_clin$Expired[dt_clin$`Study Group` == "COVID"])
+
+ggplot(dt_clin[`Study Group` == "COVID", ],
+       aes(x = Expired,
+           y = BMI)) +
+  geom_boxplot(outlier.shape = "") +
+  geom_point(aes(group = `Real ID`),
+             shape = 21,
+             size = 2,
+             position = position_dodge(0.3)) +
+  ggtitle("COVID Patients Only") +
+  theme_bw()
+```
+
+## Death vs Critical Care
+Significant
+```{r}
+addmargins(table(Death = covid$Expired,
+                 CrCare = covid$`Critical Care`))
+
+m3 <- glm(Expired ~ `Critical Care`,
           family = binomial,
-          data = droplevels(dtm1))
-summary(m1)
+          data = covid)
+s3 <- summary(m3)
+s3$coefficients
+s3
+exp(s3$coefficients[, 1])
+
+chisq.test(covid$Expired,
+           covid$`Critical Care`)
 ```
 
 ## Death vs. COVID | Diabetes
@@ -257,7 +446,7 @@ No significant difference.
 Model with interaction is worse.  
   
 ```{r}
-dtm2 <- dt1[!is.na(Expired) &
+dtm2 <- dt_clin[!is.na(Expired) &
               `Study Group` != "Unknown" &
               AnyDM != "Diabetes Unknown", ]
 
@@ -269,24 +458,13 @@ m2 <- glm(Expired ~ `Study Group` +
 summary(m2)
 ```
 
-## Death vs Critical Care
-Significant
-```{r}
-dtm3 <- dt1[!is.na(Expired) &
-              `Study Group` != "Unknown" &
-              !is.na(`Critical Care`), ]
 
-m3 <- glm(Expired ~ `Critical Care`,
-          family = binomial,
-          data = droplevels(dtm3))
-summary(m3)
-```
 
 ## Death vs COVID, adjusted for critical care
 Both significant in additive model.  
 No significance in interaction model.
 ```{r}
-dtm4 <- dt1[!is.na(Expired) &
+dtm4 <- dt_clin[!is.na(Expired) &
               AnyDM != "Diabetes Unknown" &
               `Study Group` != "Unknown" &
               !is.na(`Critical Care`), ]
@@ -305,7 +483,7 @@ summary(m41)
 ## Death vs COVID, adjusted for DM
 No significance
 ```{r}
-dtm5 <- dt1[!is.na(Expired) &
+dtm5 <- dt_clin[!is.na(Expired) &
               `Study Group` != "Unknown" &
               AnyDM != "Diabetes Unknown", ]
 
@@ -318,7 +496,7 @@ summary(m5)
 
 ## Death vs COVID, adjusted 
 ```{r}
-dtm6 <- dt1[!is.na(Expired) &
+dtm6 <- dt_clin[!is.na(Expired) &
               `Study Group` != "Unknown" &
               AnyDM != "Diabetes Unknown" &
               !is.na(Age_Category), ]
@@ -336,16 +514,16 @@ summary(m6)
 
 # New variable: DM+Obesity
 ```{r}
-chisq.test(dt1$AnyDM,
-           dt1$Obese)
+chisq.test(dt_clin$AnyDM,
+           dt_clin$Obese)
 ```
 
 
 # ICU LOS
 ```{r}
-summary(dt1$LOS)
-hist(dt1$LOS)
-hist(log2(dt1$LOS + 1))
+summary(dt_clin$LOS)
+hist(dt_clin$LOS)
+hist(log2(dt_clin$LOS + 1))
 
 m2 <- lm(log2(LOS + 1) ~ AnyDM +
            Age +
@@ -354,7 +532,7 @@ m2 <- lm(log2(LOS + 1) ~ AnyDM +
            BMI +
            `Critical Care`,
          family = binomial,
-         data = droplevels(dt1[!is.na(Expired) &
+         data = droplevels(dt_clin[!is.na(Expired) &
                                  AnyDM != "Diabetes Unknown", ]))
 summary(m2)
 ```
@@ -367,7 +545,7 @@ m3 <- glm(`Critical Care` ~ AnyDM +
             Race +
             BMI,
           family = binomial,
-          data = droplevels(dt1[!is.na(Expired) &
+          data = droplevels(dt_clin[!is.na(Expired) &
                                   AnyDM != "Diabetes Unknown", ]))
 summary(m3)
 ```
