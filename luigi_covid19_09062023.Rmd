@@ -13,9 +13,6 @@ https://rutgers.app.box.com/folder/227391194192
 GitHub Repo:  
 https://github.com/sargdavid/luigi_covid19  
   
-My GitHub Token (instead of password):  
-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  
-  
 # Setup
 ```{r setup}
 require(data.table)
@@ -570,7 +567,6 @@ dds <- DESeqDataSetFromMatrix(countData = dt2[, cov_464811:ctl_784880],
                               ~ rnaseq_cohort)
 ```
 
-
 ```{r}
 # dss <- estimateSizeFactors(dds, 
 #                            type = "iterate")
@@ -584,11 +580,9 @@ res[1:10, ]
 
 out <- data.table(gene_id = rownames(res),
                   res)
-
 ```
 
 # Session
 ```{r}
 sessionInfo()
 ```
-
