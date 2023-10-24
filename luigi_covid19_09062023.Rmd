@@ -318,6 +318,14 @@ save(dt_rna,
 
 save(rnaseq_meta,
      file = "Data/rnaseq_meta.RData")
+
+write.csv(dt_clin,
+          file = "Data/luigi_covid19_clinical_data.csv",
+          row.names = FALSE)
+
+write.csv(dt_rna,
+          file = "Data/luigi_covid19_nra_seq_data.csv",
+          row.names = FALSE)
 ```
 
 ## Clean
