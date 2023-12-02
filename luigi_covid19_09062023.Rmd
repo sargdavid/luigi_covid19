@@ -31,6 +31,16 @@ Javier, 9/15/2023:
 dt_clin <- fread("Data/COVID study Master sheet w ELISA data July 2023-2.csv")
 ```
 
+## Remove Patient 7247980
+Patient 7247980 was marked “COVID-Positive” instead of 1-3 in Inpatient=1, ER=2, OP=3, and had most data missing. Removed from the analysis. Luigi agreed.
+```{r}
+dt_clin <- dt_clin[`Real ID` != 7247980, ]
+
+# # Remove 1 patient marked 'COVID-Positive': SAME patient!
+# dt_clin[`Inpatient=1, ER=2, OP=3` == "COVID-Positive",]
+# dt_clin <- dt_clin[`Inpatient=1, ER=2, OP=3` != "COVID-Positive", ]
+```
+
 ### Format clinical variables
 ```{r}
 dt_clin$`Real ID` <- as.character(dt_clin$`Real ID`)
@@ -46,10 +56,6 @@ dt_clin$`Study Group` <- factor(dt_clin$`Study Group`,
                             labels = c("No COVID",
                                        "COVID"))
 
-# Remove 1 patient marked 'COVID-Positive'
-dt_clin[`Inpatient=1, ER=2, OP=3` == "COVID-Positive",]
-dt_clin <- dt_clin[`Inpatient=1, ER=2, OP=3` != "COVID-Positive", ]
-
 dt_clin$`Inpatient=1, ER=2, OP=3` <- factor(dt_clin$`Inpatient=1, ER=2, OP=3`,
                                         levels = 1:3,
                                         labels = c("Inpatient",
@@ -61,50 +67,56 @@ dt_clin$Sex <- factor(dt_clin$Sex,
                   labels = c("Male",
                              "Female"))
 
-# !!! GET LABELS!!!
+# Keys from Lu
+# NOTE: =4 is not in the Keys!
 dt_clin$Race <- factor(dt_clin$Race,
                    levels = 0:4,
                    labels = c("White Non-Hispanic",
-                              "Hispanic",
                               "Black",
-                              "Asian",
-                              "Other"))
+                              "Indian/Asian",
+                              "Other",
+                              "Unknown"))
 
 dt_clin$`If BMI ?30 Obesity Class (I,II,III)` <- factor(dt_clin$`If BMI ?30 Obesity Class (I,II,III)`,
                                                     levels = c("I",
                                                                "II",
                                                                "III"))
 
+# !!!GET LABELS!!!
 dt_clin$Vaccinated <- factor(dt_clin$Vaccinated,
-                         levels = 0:1)
+                         levels = c(0, 1, 9))
 
 dt_clin$`Dose #1` <- factor(dt_clin$`Dose #1`,
-                        levels = 0:1)
+                        levels = c(0, 1, 9))
 
 dt_clin$`Dose #2` <- factor(dt_clin$`Dose #2`,
-                        levels = 0:1)
+                        levels = c(0, 1, 9))
 
-# !!!GET LABELS!!!
 dt_clin$Booster <- factor(dt_clin$Booster,
                       levels = c(0, 1, 9))
 
 dt_clin$`Critical Care` <- factor(dt_clin$`Critical Care`,
                               levels = 0:1)
 
+# LOS = length of stay in the hospital
 dt_clin$Still_In_Hospital_08182023 <- is.na(as.numeric(dt_clin$LOS))
 dt_clin$LOS <- as.numeric(sapply(strsplit(x = dt_clin$LOS, 
                                       split = " "), 
                              function(x) x[1]))
 
+# Death
 dt_clin$Expired <- factor(dt_clin$Expired,
                       levels = 0:1)
 
 dt_clin$Wave <- factor(dt_clin$Wave,
                    levels = c(1:4))
 
-# !!! GET LABELS!!!
+# Luigi's keys
 dt_clin$`Smoking History (0,1,2)` <- factor(dt_clin$`Smoking History (0,1,2)`,
-                                        levels = 0:2)
+                                        levels = 0:2,
+                                        labels = c("Never",
+                                                   "Former",
+                                                   "Current"))
 
 # !!! GET LABELS!!!
 dt_clin$Age_Category <- factor(dt_clin$Age_Category,
