@@ -1,0 +1,454 @@
+---
+title: "Luigi's Data June 2022"
+output: html_notebook
+---
+
+On Tue, Jul 12, 2022 at 1:51 PM Luigi Brunetti <luigi.brunetti@rutgers.edu> wrote:
+Here are the drugs that could be interesting to look at:
+
+ 
+
+Remdesvir
+
+Corticosteroids (just combine dexamethasone, methylprednisone, prednisone, and hydrocortisone)
+
+ACEi
+
+ARBs
+
+Metformin
+
+Sulfonylureas (combine glimepiride and glipizide)
+
+Sitagliptin
+
+Anticoagulation (subgroups therapeutic and prophylactic)
+
+ 
+
+If we need to reduce the number then I would remove remdesivir, corticosteroids, and anticoagulation since these would be acute medications versus the others which would be chronic medications.  Let me know if this makes sense.
+
+ 
+
+I also asked the lab for more samples, will see what they say.
+
+# Setup
+```{r}
+require(data.table)
+require(ggplot2)
+require(table1)
+# require(randomForest)
+# require(randomForestExplainer)
+# require(rpart)
+```
+
+# Load data
+```{r}
+getwd()
+dt1 <- fread("Data/COVID_19_RNA_Demo.csv")
+```
+
+# Convert variables
+```{r}
+# Rename
+colnames(dt1)[colnames(dt1) == "Rheum/ CONNECTIVE TISSUE DISEASE"] <- "Rheum"
+colnames(dt1)[colnames(dt1) == "Smoking History (0,1,2)"] <- "Smoking"
+
+which(colnames(dt1) == "If BMI ?30 Obesity Class (I,II,III)")
+which(colnames(dt1) == "Prophylactic Anticoagulation")
+which(colnames(dt1) == "Hyperlipidemia")
+
+dt1[, c(1:3,
+        5:6,
+        10:15,
+        18:61,
+        77:85)] <- lapply(X = dt1[, c(1:3,
+                                      5:6,
+                                      10:15,
+                                      18:61,
+                                      77:85)],
+                          FUN = "factor")
+
+which(colnames(dt1) == "ALT")
+
+dt1[, c(4,
+        7:9,
+        64:76)] <- lapply(X = dt1[, c(4,
+                                      7:9,
+                                      64:76)],
+                          FUN = "as.numeric")
+```
+
+# Response: Critical Care
+## Table 1.1
+```{r}
+table1( ~.|`Critical Care`,
+       data = dt1[, -c("Fake_ID")])
+```
+  
+## Chi-sq test
+```{r}
+chisq.test(dt1$`Critical Care`,
+           dt1$Vaccinated,
+           correct = FALSE)
+
+chisq.test(dt1$`Critical Care`,
+           dt1$Vaccinated,
+           correct = TRUE)
+
+chisq.test(dt1$`Critical Care`,
+           dt1$Vaccinated,
+           simulate.p.value = TRUE)
+```
+
+## Logistic regression
+```{r}
+m1 <- glm(`Critical Care` ~ Vaccinated,
+          data = dt1,
+          family = "binomial")
+summary(m1)
+
+m2 <- glm(`Critical Care` ~ Vaccinated + 
+            Sex +
+            Race +
+            Wave + 
+            Age_Cat +
+            MI +
+            HF +
+            PVD +
+            CVD +
+            Dementia +
+            COPD +
+            Rheum +
+            AnyDM +
+            Smoking +
+            # PUD +
+            # mliverd +
+            # Hemoplegia +
+            RenalD +
+            Cancer +
+            HTN +
+            Obese +
+            Hyperlipidemia,
+          data = dt1,
+          family = "binomial")
+summary(m2)
+```
+
+## Poisson regression
+```{r}
+m3 <- glm((`Critical Care` == 1) ~ Vaccinated,
+          data = dt1,
+          family = "poisson")
+summary(m3)
+
+m4 <- glm((`Critical Care` == 1) ~ Vaccinated + 
+            Sex +
+            Race +
+            Wave + 
+            Age_Cat +
+            MI +
+            HF +
+            PVD +
+            CVD +
+            Dementia +
+            COPD +
+            Rheum +
+            AnyDM +
+            Smoking +
+            # PUD +
+            # mliverd +
+            # Hemoplegia +
+            RenalD +
+            Cancer +
+            HTN +
+            Obese +
+            Hyperlipidemia,
+          data = dt1,
+          family = "poisson")
+summary(m4)
+```
+
+## Random forest
+```{r}
+rf1 <- randomForest(`Critical Care` ~ Vaccinated + 
+                      Sex +
+                      Race +
+                      Wave + 
+                      Age_Cat +
+                      MI +
+                      HF +
+                      PVD +
+                      CVD +
+                      Dementia +
+                      COPD +
+                      Rheum +
+                      AnyDM +
+                      Smoking +
+                      # PUD +
+                      # mliverd +
+                      # Hemoplegia +
+                      RenalD +
+                      Cancer +
+                      HTN +
+                      Obese +
+                      Hyperlipidemia,
+                    data = dt1[!is.na(Smoking), ],
+                    ntree = 10000,
+                    importance = TRUE,
+                    localImp = TRUE)
+rf1
+plot(rf1)
+```
+
+```{r}
+explain_forest(forest = rf1)
+```
+
+## Desision tree
+```{r}
+rpart1 <- rpart(`Critical Care` ~ Vaccinated + 
+                  Sex +
+                  Race +
+                  Wave + 
+                  Age_Cat +
+                  MI +
+                  HF +
+                  PVD +
+                  CVD +
+                  Dementia +
+                  COPD +
+                  Rheum +
+                  AnyDM +
+                  Smoking +
+                  # PUD +
+                  # mliverd +
+                  # Hemoplegia +
+                  RenalD +
+                  Cancer +
+                  HTN +
+                  Obese +
+                  Hyperlipidemia,
+                data = dt1,
+                method = "class",
+                control = rpart.control(minsplit = 1,
+                                        minbucket = 1,
+                                        cp = 0))
+rpart1
+```
+
+```{r}
+plot(rpart1)
+text(rpart1,
+     use.n = TRUE,
+     all = TRUE,
+     cex = 0.6)
+
+```
+
+# Response: Death
+## Table1.2
+```{r}
+table1( ~.|Expired,
+       data = dt1[, -c("Fake_ID")])
+```
+
+## Chi-sq test
+```{r}
+addmargins(table(Expired = dt1$Expired,
+                 Vaccinated = dt1$Vaccinated))
+100*prop.table(addmargins(table(Expired = dt1$Expired,
+                                Vaccinated = dt1$Vaccinated)))
+
+
+chisq.test(dt1$Expired,
+           dt1$Vaccinated,
+           correct = TRUE)
+```
+
+## Logistic regression
+```{r}
+m1 <- glm(Expired ~ Vaccinated,
+          data = dt1,
+          family = "binomial")
+summary(m1)
+
+m2 <- glm(Expired ~ Vaccinated + 
+            Sex +
+            Race +
+            Wave + 
+            Age_Cat +
+            MI +
+            HF +
+            PVD +
+            CVD +
+            Dementia +
+            COPD +
+            Rheum +
+            AnyDM +
+            Smoking +
+            # PUD +
+            # mliverd +
+            # Hemoplegia +
+            RenalD +
+            Cancer +
+            HTN +
+            Obese +
+            Hyperlipidemia,
+          data = dt1,
+          family = "binomial")
+summary(m2)
+```
+
+## Random forest
+```{r}
+rf2 <- randomForest(Expired ~ Vaccinated + 
+                      Sex +
+                      Race +
+                      Wave + 
+                      Age_Cat +
+                      MI +
+                      HF +
+                      PVD +
+                      CVD +
+                      Dementia +
+                      COPD +
+                      Rheum +
+                      AnyDM +
+                      Smoking +
+                      # PUD +
+                      # mliverd +
+                      # Hemoplegia +
+                      RenalD +
+                      Cancer +
+                      HTN +
+                      Obese +
+                      Hyperlipidemia,
+                    data = dt1[!is.na(Smoking), ],
+                    ntree = 10000,
+                    importance = TRUE,
+                    localImp = TRUE)
+rf2
+plot(rf2)
+```
+
+```{r}
+explain_forest(forest = rf2)
+```
+
+## Additional tables
+```{r}
+addmargins(table(dt1$`Critical Care`,
+                 dt1$Expired))
+
+chisq.test(dt1$`Critical Care`,
+                 dt1$Expired)
+```
+
+
+# Response: log[LOS]
+## Table1.3
+```{r, warning=FALSE}
+table1( ~.|(LOS > 5),
+       data = dt1[, -c("Fake_ID")])
+```
+
+## Figures
+```{r}
+hist(dt1$LOS, 110)
+table(dt1$Vaccinated)
+
+
+dt1$logLOS <- log(dt1$LOS + 1)
+hist(dt1$logLOS, 50)
+
+boxplot(logLOS ~ Vaccinated,
+         data = dt1)
+```
+
+## Linear regression
+```{r}
+m1 <- lm(logLOS ~ Vaccinated,
+         data = dt1)
+summary(m1)
+
+m2 <- lm(logLOS ~ Vaccinated + 
+           Sex +
+           Race +
+           Wave + 
+           Age_Cat +
+           MI +
+           HF +
+           PVD +
+           CVD +
+           Dementia +
+           COPD +
+           Rheum +
+           AnyDM +
+           Smoking +
+           # PUD +
+           # mliverd +
+           # Hemoplegia +
+           RenalD +
+           Cancer +
+           HTN +
+           Obese +
+           Hyperlipidemia,
+         data = dt1)
+summary(m2)
+
+plot(dt1$logLOS ~ dt1$BMI)
+```
+
+## Random forest
+```{r}
+rf3 <- randomForest(logLOS ~ Vaccinated + 
+                      Sex +
+                      Race +
+                      Wave + 
+                      Age_Cat +
+                      MI +
+                      HF +
+                      PVD +
+                      CVD +
+                      Dementia +
+                      COPD +
+                      Rheum +
+                      AnyDM +
+                      Smoking +
+                      # PUD +
+                      # mliverd +
+                      # Hemoplegia +
+                      RenalD +
+                      Cancer +
+                      HTN +
+                      Obese +
+                      Hyperlipidemia,
+                    data = dt1[!is.na(Smoking), ],
+                    ntree = 10000,
+                    importance = TRUE,
+                    localImp = TRUE)
+rf3
+plot(rf3)
+```
+
+```{r}
+explain_forest(forest = rf3)
+```
+
+# ELISA data
+```{r}
+dt21 <- fread("Luigi_August2023/COVID study Master sheet w ELISA data July 2023.csv")
+dt22 <- fread("Luigi_August2023/COVID study Master sheet w ELISA data July 2023-2.csv")
+```
+
+# Gene expressions
+```{r}
+dt3 <- fread("Luigi_August2023/gene_counts.txt")
+```
+
+# Session
+```{r}
+sessionInfo()
+```
+
