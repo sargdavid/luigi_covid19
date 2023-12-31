@@ -344,7 +344,7 @@ id_no_rna
 
 ### lncRNA database from John Johnson (NOT USED YET)
 ```{r}
-dt_lnc_john <- fread("Data/lncipedia_transcript_type.lncRNA")
+# dt_lnc_john <- fread("Data/lncipedia_transcript_type.lncRNA")
 ```
 
 ## Save data
