@@ -15,15 +15,86 @@ https://github.com/sargdavid/luigi_covid19
   
 # Setup
 ```{r setup}
+options(scipen=999)
+
 require(data.table)
 require(ggplot2)
 require(table1)
 require(DESeq2)
+
+require(tidytlg)
+require(gt)
+require(rtables)
+require(gridExtra)
 ```
 
 Javier, 9/15/2023:  
 1. Build survival model using LOS as dates. Assuming all death are in-hospital, end of LOS.  
 
+```{r}
+# rows_empty <- function(mat) {
+#   unlist(apply(mat, 1, function(x) !any(nzchar(x))), simplify = FALSE)
+# }
+# 
+# #' Emit a table as RTF via gentlg
+# #' @inheritParams formatters::matrix_form
+# tt_to_tbldf <- function(tt) {
+#   mpf <- matrix_form(tt, indent_rownames = FALSE, expand_newlines = FALSE)
+#   strmat <- mf_strings(mpf)
+#   nhl <- mf_nlheader(mpf)
+#   strbody <- strmat[-(1:nhl), , drop = FALSE]
+#   row_type <- apply(strbody, 1, 
+#                     function(x) {
+#                       nonempty <- nzchar(x)
+#                       if(all(!nonempty)) { ## shouldn't ever happen
+#                         "EMPTY"
+#                       } else if (nonempty[1] && all(!nonempty[-1])) {# only 1st cell nonempty
+#                         "HEADER"
+#                       } else {
+#                         if(x[1] == "N")
+#                           "N"
+#                         else
+#                           "VALUE"
+#                       }
+#                     })
+#   rowdf <- mf_rinfo(mpf)
+#   rinds <- mf_lgrouping(mpf)[-(1:nhl)] - mf_nrheader(mpf)
+#   indentme <- rowdf$indent[rinds]
+#   anbr <- cumsum(!is.na(c(0, head(rowdf$trailing_sep, -1))))[rinds] + 1 ## so it starts at 1
+#   roworder <- 1:NROW(rowdf) - (anbr - 1)
+#   newrows <- c(0, ifelse(tail(anbr, -1) == head(anbr, -1), 0, 1))
+#   
+#   tbldf <- as.data.frame(strbody)
+#   names(tbldf) <- c("label", paste("col", seq(1, ncol(tbldf) - 1)))
+#   cbind(tbldf, data.frame(row_type = row_type,
+#                           anbr = anbr,
+#                           indentme = indentme,
+#                           roworder = roworder, 
+#                           newrows = newrows,
+#                           stringsAsFactors = FALSE))
+# }
+# 
+# #' @rdname tt_to_tbldf
+# #' @param file character(1). File path for output.
+# tt_to_tlgrtf <- function(tt, file = "./table") {
+#   df <- tt_to_tbldf(tt)
+#   mpf <- matrix_form(tt, indent_rownames = FALSE, expand_newlines = FALSE)
+#   
+#   strmat <- mf_strings(mpf)
+#   nhl <- mf_nlheader(mpf)
+#   nspancols <- nhl - 1L
+#   if(nspancols > 0)
+#     csph <- lapply(seq_len(nspancols), function(ii) strmat[ii,])
+#   else
+#     csph <- NULL
+#   gentlg(df,
+#          colspan = csph, 
+#          file = file,
+#          colheader = strmat[nhl,],
+#          title = main_title(tt),
+#          footers = c(main_footer(tt), prov_footer(tt)))
+# }
+```
 
 # Data
 ## Clinical variables and ELISA
@@ -194,7 +265,7 @@ summary(dt1)
 ```
 
 ## Gene expressions
-NOTE: data contains both, coding and noncoding genes.  
+NOTE: data contains both, coding and non-coding genes.  
   
 ### First RNA-seq file
 ```{r}
@@ -271,6 +342,11 @@ id_no_rna <- dt1$`Real ID`[!(dt1$`Real ID` %in% rnaseq_meta$`Real ID`)]
 id_no_rna 
 ```
 
+### lncRNA database from John Johnson (NOT USED YET)
+```{r}
+dt_lnc_john <- fread("Data/lncipedia_transcript_type.lncRNA")
+```
+
 ## Save data
 ```{r}
 save(dt1,
@@ -294,11 +370,6 @@ write.csv(dt_rna,
 ## Clean
 ```{r}
 rm(list = ls())
-
-# rm(list = ls()[!ls() %in% c("dt1",
-#                             "dt_rna",
-#                             "rnaseq_meta")])
-
 gc()
 ```
 
@@ -334,6 +405,31 @@ addmargins(table(Death = dt1$Expired,
                  COVID = dt1$`Study Group`))
 ```
 
+```{r}
+m1 <- glm(Expired ~ `Study Group`,
+          family = binomial,
+          data = dt1)
+s1 <- summary(m1)
+ci1 <- confint(m1)
+
+out1 <- data.table(Response = "Dead",
+                    Comparison = "COVID vs. No Covid",
+                    OR = round(exp(s1$coefficients[-1, 1]),
+                               2),
+                    `95% C.I.L.B.` = exp(ci1[2, 1]),
+                    `95% C.I.U.B.` = exp(ci1[2, 2]),
+                    `p-Value` = ifelse(s1$coefficients[-1, 4] >= 0.001,
+                                       round(s1$coefficients[-1, 4],
+                                             3),
+                                       "<0.001"),
+                    sign = ifelse(s1$coefficients[-1, 4] <= 0.05,
+                                  ifelse(s1$coefficients[-1, 4] <= 0.01,
+                                         "**",
+                                         "*"), ""))
+
+out1
+```
+
 ### Death vs DM,  COVID only 
 ```{r}
 covid <- droplevels(dt1[`Study Group` == "COVID", ])
@@ -349,18 +445,18 @@ nocovid <- droplevels(dt1[`Study Group` != "COVID", ])
 
 ### Death vs Obese, COVID only 
 ```{r}
-chisq.test(dt1$Expired[dt1$`Study Group` == "COVID"],
-           dt1$Obese[dt1$`Study Group` == "COVID"])
+chisq.test(covid$Expired,
+           covid$Obese)
 
-addmargins(table(Death = dt1$Expired[dt1$`Study Group` == "COVID"],
-                 Obese = dt1$Obese[dt1$`Study Group` == "COVID"]))
+addmargins(table(Death = covid$Expired,
+                 Obese = covid$Obese))
 ```
 
 ### Death vs BMI, COVID only 
 ```{r}
-t.test(dt1$BMI[dt1$`Study Group` == "COVID"] ~ dt1$Expired[dt1$`Study Group` == "COVID"])
+t.test(covid$BMI ~ covid$Expired)
 
-ggplot(dt1[`Study Group` == "COVID", ],
+ggplot(covid,
        aes(x = Expired,
            y = BMI)) +
   geom_boxplot(outlier.shape = "") +
@@ -429,15 +525,10 @@ No significant difference.
 Model with interaction is worse.  
   
 ```{r}
-dtm2 <- dt1[!is.na(Expired) &
-              `Study Group` != "Unknown" &
-              AnyDM != "Diabetes Unknown", ]
-
-
 m2 <- glm(Expired ~ `Study Group` +
             AnyDM,
           family = binomial,
-          data = droplevels(dtm2))
+          data = dt1)
 s2 <- summary(m2)
 
 out2 <- data.table(Response = "Dead",
@@ -460,45 +551,53 @@ out2
 
 ### Death vs COVID, adjusted for critical care
 Both significant in additive model.  
-No significance in interaction model.
 ```{r}
-dtm4 <- dt1[!is.na(Expired) &
-              AnyDM != "Diabetes Unknown" &
-              `Study Group` != "Unknown" &
-              !is.na(`Critical Care`), ]
-
 m4 <- glm(Expired ~ `Study Group` + `Critical Care`,
           family = binomial,
-          data = droplevels(dtm4))
-summary(m4)
+          data = dt1)
+s4 <- summary(m4)
+ci4 <- confint(m4)
 
+out4 <- data.table(Response = "Dead",
+                    Comparison = c("COVID vs. No Covid",
+                                   "ICU"),
+                    OR = round(exp(s4$coefficients[-1, 1]),
+                               2),
+                    `95% C.I.L.B.` = exp(ci4[-1, 1]),
+                    `95% C.I.U.B.` = exp(ci4[-1, 2]),
+                    `p-Value` = ifelse(s4$coefficients[-1, 4] >= 0.001,
+                                       round(s4$coefficients[-1, 4],
+                                             3),
+                                       "<0.001"),
+                    sign = ifelse(s4$coefficients[-1, 4] <= 0.05,
+                                  ifelse(s4$coefficients[-1, 4] <= 0.01,
+                                         "**",
+                                         "*"), ""))
+
+out4
+```
+
+No significance in interaction model.
+```{r}
 m41 <- glm(Expired ~ `Study Group`*`Critical Care`,
           family = binomial,
-          data = droplevels(dtm4))
+          data = dt1)
 summary(m41)
 ```
+
 
 ### Death vs COVID, adjusted for DM
 No significance
 ```{r}
-dtm5 <- dt1[!is.na(Expired) &
-              `Study Group` != "Unknown" &
-              AnyDM != "Diabetes Unknown", ]
-
 m5 <- glm(Expired ~ `Study Group` +
             AnyDM,
           family = binomial,
-          data = droplevels(dtm5))
+          data = dt1)
 summary(m5)
 ```
 
 ### Death vs COVID, adjusted 
 ```{r}
-dtm6 <- dt1[!is.na(Expired) &
-              `Study Group` != "Unknown" &
-              AnyDM != "Diabetes Unknown" &
-              !is.na(Age_Category), ]
-
 m6 <- glm(Expired ~ `Study Group` +
             AnyDM +
             Age_Category +
@@ -506,7 +605,7 @@ m6 <- glm(Expired ~ `Study Group` +
             Race +
             BMI,
           family = binomial,
-          data = droplevels(dtm6))
+          data = dt1)
 summary(m6)
 ```
 
@@ -520,46 +619,76 @@ chisq.test(dt1$AnyDM,
 ### ICU LOS
 ```{r}
 summary(dt1$`ICU LOS`)
-hist(dt1$`ICU LOS`)
-hist(log2(dt1$`ICU LOS` + 1))
+hist(dt1$`ICU LOS`, 200)
+hist(log2(dt1$`ICU LOS` + 1), 200)
 
-m2 <- lm(log2(`ICU LOS` + 1) ~ AnyDM +
+m7 <- lm(log2(`ICU LOS` + 1) ~ AnyDM +
            Age +
            Sex +
            Race +
            BMI +
            `Critical Care`,
          family = binomial,
-         data = droplevels(dt1[!is.na(Expired) &
-                                 AnyDM != "Diabetes Unknown", ]))
-summary(m2)
+         data = dt1)
+summary(m7)
 ```
 
 ### Critical care
 ```{r}
-m3 <- glm(`Critical Care` ~ AnyDM +
+m8 <- glm(`Critical Care` ~ AnyDM +
             Age +
             Sex +
             Race +
             BMI,
           family = binomial,
-          data = droplevels(dt1[!is.na(Expired) &
-                                  AnyDM != "Diabetes Unknown", ]))
-summary(m3)
+          data = droplevels(dt1))
+summary(m8)
 ```
 
 ## WHO-OSCI
+### Desease severity at baseline by WHO-OSCI
+if <5: mild  
+if >+ 5: severe  
+if 8: dead  
+
+```{r}
+covid$who_osci_d1_cat <- "Dead"
+covid$who_osci_d1_cat[as.numeric(as.character(covid$`WHO-OSCI D1`)) < 8] <- "Severe"
+covid$who_osci_d1_cat[as.numeric(as.character(covid$`WHO-OSCI D1`)) < 5] <- "Mild"
+
+covid$who_osci_d1_cat <- factor(covid$who_osci_d1_cat,
+                             levels = c("Mild",
+                                        "Severe"))
+summary(covid$who_osci_d1_cat)
+```
+
+```{r}
+addmargins(table("WHO-OSCI D1" = dt1$`WHO-OSCI D1`,
+                 CC = dt1$`Critical Care`))
+```
+
 ### WHO-OSCI over time
 ```{r}
-tmp <- dt1[, c(1, 5, 37, 82:87)]
+tmp <- dt1[, c("Real ID",
+               "Study Group",
+               "AnyDM",
+               "Expired",
+               "WHO-OSCI D1",
+               "WHO-OSCI D3",
+               "WHO-OSCI D7",
+               "WHO-OSCI D14",
+               "WHO-OSCI D21",
+               "WHO-OSCI D28",
+               "WHO-OSCI DISCHARGE")]
+
 tmp <- melt.data.table(tmp,
-                       id.vars = c(1:3),
+                       id.vars = c(1:4),
                        variable.name = "Day",
                        value.name = "WHO_OSCI")
 tmp$Day <- factor(tmp$Day,
                        levels = unique(tmp$Day))
 
-tmp <- tmp[!is.na(tmp$WHO_OSCI)]
+tmp <- tmp[!is.na(tmp$WHO_OSCI), ]
 ggplot(tmp,
        aes(x = Day,
            y = WHO_OSCI,
@@ -578,13 +707,62 @@ table(dt1$`WHO-OSCI D1`,
       dt1$Expired)
 ```
 
+```{r}
+t2 <- dcast.data.table(`Real ID` ~ Day,
+                 value.var = "WHO_OSCI",
+                 data = tmp[Expired == 1, ])
 
-## RNA-seq
-### Merge RNA-seq meta-data with clinical
+write.csv(t2,
+          file = "tmp/table2.csv",
+          row.names = FALSE)
+
+t2
+```
+
+```{r}
+dt1[,
+    .(N = .N,
+      mu_los = mean(LOS),
+      sem_los = sd(LOS)/sqrt(.N)),
+    by = c("Study Group")]
+
+dt1[,
+    .(N = .N,
+      mu_los = mean(LOS),
+      sem_los = sd(LOS)/sqrt(.N)),
+    by = c("Expired")]
+
+dt1[,
+    .(N = .N,
+      mu_los = mean(LOS),
+      sem_los = sd(LOS)/sqrt(.N)),
+    by = c("Expired",
+           "Study Group")]
+
+dt1[LOS > 1,
+    .(N = .N,
+      mu_los = mean(LOS),
+      sem_los = sd(LOS)/sqrt(.N)),
+    by = c("Expired",
+           "Study Group")]
+```
+
+
+```{r}
+dt1$LOS[dt1$`Real ID` == 771982]
+```
+
+# RNA-seq
+https://bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html  
+  
+## Merge RNA-seq meta-data with clinical
 ```{r}
 rnaseq_meta_clin <- merge(rnaseq_meta,
                           dt1[, c("Real ID",
                                   "Study Group",
+                                  "Expired",
+                                  "Critical Care",
+                                  "Age",
                                   "Sex",
                                   "Race",
                                   "BMI",
@@ -592,34 +770,151 @@ rnaseq_meta_clin <- merge(rnaseq_meta,
                           by = "Real ID")
 ```
 
-
-### DESeq2
+## Duplicated gene names
 ```{r}
-rnaseq_meta$rnaseq_cohort <- factor(rnaseq_meta$rnaseq_cohort,
-                                    levels = c("ctl",
-                                               "cov"))
-tmp <- data.frame(dt_rna[, rnaseq_meta_clin$sample_names,
-                         with = FALSE])
-rownames(tmp) <- dt_rna$gene_id
+dups <- dt_rna[gene_name %in% gene_name[duplicated(gene_name) == TRUE], ]
+```
 
+## Gene types
+```{r}
+addmargins(table(dt_rna$gene_biotype))
+```
+
+## Protein coding genes only
+```{r}
+dt_rna_cod <- dt_rna[gene_biotype == "protein_coding",]
+```
+
+### Duplicated coding genes
+```{r}
+dup_cod <- dt_rna_cod[gene_name %in% gene_name[duplicated(gene_name) == TRUE], ]
+dup_cod_genes <- unique(dup_cod$gene_name)
+dup_cod_genes
+```
+
+### Add counts for the same genes
+```{r}
+out <- list()
+for (i in 1:length(dup_cod_genes)) {
+  out[[i]] <- dup_cod[gene_name == dup_cod_genes[i], ]
+  
+  for (j in 11:ncol(dup_cod)) {
+    out[[i]][, j] <- sum(out[[i]][, j, with = FALSE])
+  }
+  out[[i]] <- out[[i]][gene_length == max(gene_length), ][1, ]
+}
+out <- do.call("rbind",
+               out)
+
+out
+```
+
+### Delete duplicates and replace them with aggregated counts for those genes
+```{r}
+dt_rna_cod <- dt_rna_cod[!(gene_name %in% dup_cod_genes), ]
+
+dt_rna_cod <- rbindlist(list(dt_rna_cod,
+                             out))
+
+length(unique(dt_rna_cod$gene_name))
+nrow(dt_rna_cod)
+```
+
+### Prepare DESeq object
+```{r}
 names(rnaseq_meta_clin)[3] <- "Cohort"
 
-dds <- DESeqDataSetFromMatrix(countData = tmp, 
+ndx <- which(colnames(dt_rna_cod) %in% rnaseq_meta_clin$sample_names)
+rnaseq_meta_clin$Cohort <- gsub(x = rnaseq_meta_clin$Cohort,
+                                pattern = " ",
+                                replacement = "_")
+rnaseq_meta_clin$Cohort <- factor(rnaseq_meta_clin$Cohort,
+                                  levels = c("No_COVID",
+                                             "COVID"))
+```
+
+### DESeq: COVID/non-COVID
+```{r}
+
+
+tmp <- as.matrix(dt_rna_cod[, ndx, with = FALSE])
+rownames(tmp) <- dt_rna_cod$gene_id
+
+dds_cod <- DESeqDataSetFromMatrix(countData = tmp, 
                               colData = rnaseq_meta_clin,
                               ~ Cohort)
 ```
 
+#### Filter out genes with small number of hits
+Keep the genes with at least 5 out of 92 samples having at least 10 hits each
 ```{r}
-# dss <- estimateSizeFactors(dds, 
-#                            type = "iterate")
+# Number of samples with at least 10 hits in at least X samples
+min_n_hits <- c(1, 5, 10, 20, 50)
 
-deseq <- DESeq(dds)
+l2 <- list()
+
+for (j in 1:length(min_n_hits)) {
+  
+  l1 <- list()
+  
+  for (i in 1:length(ndx)) {
+    
+    l1[[i]] <- data.table(`Min N of hits per sample` = min_n_hits[j],
+                          `N samples with min hits or more` = i,
+                          `N genes` = sum(rowSums(counts(dds_cod) >= j) >= i))
+  }
+  l2[[j]] <- do.call("rbind",
+                     l1)
+}
+
+ll <- do.call("rbind",
+              l2)
+ll$`Min N of hits per sample` <- factor(ll$`Min N of hits per sample`,
+                                        levels = min_n_hits)
 ```
 
 ```{r}
-res <- results(deseq)
-res[1:10, ]
+ll$lw <- 0.5
+ll$lw[ll$`Min N of hits per sample` == 10] <- 1.5
 
+ggplot(ll,
+       aes(x = `N samples with min hits or more`,
+           y = `N genes`,
+           group = `Min N of hits per sample`,
+           color = `Min N of hits per sample`)) +
+  geom_line(linewidth = ll$lw) +
+  geom_vline(xintercept = 10,
+             linetype = "dashed",
+             color = "red") +
+  scale_x_continuous(breaks = seq(0, 92, 5)) +
+  theme_bw()
+```
+
+```{r}
+keep <- rowSums(counts(dds_cod) >= 10) >= 10
+sum(keep)
+
+dds_cod <- dds_cod[keep, ]
+```
+
+#### Run DESeq
+```{r}
+deseq_cod <- DESeq(dds_cod)
+
+# deseq <- DESeq(dds,
+#                fitType = "glmGamPoi")
+
+resultsNames(deseq_cod)
+```
+
+#### DESeq results
+```{r}
+res <- results(deseq_cod)
+res[1:10, ]
+rownames(res)[1:10]
+```
+
+```{r}
 out <- data.table(gene_id = rownames(res),
                   baseMean = res$baseMean,
                   log2FoldChange = res$log2FoldChange,
@@ -628,8 +923,8 @@ out <- data.table(gene_id = rownames(res),
                   pvalue = res$pvalue,
                   padj = res$padj)
 
-out <- merge(dt_rna[, c("gene_name",
-                        "gene_id")],
+out <- merge(dt_rna_cod[, c("gene_name",
+                            "gene_id")],
              out,
              by = "gene_id")
 
@@ -642,15 +937,410 @@ setorder(out,
 head(out)
 
 write.csv(out,
-          file = "tmp/deseq2_covid_nocovid.CSV",
+          file = "tmp/deseq2_cod_covid_nocovid.CSV",
           row.names = FALSE)
 ```
 
 ```{r}
-tmp5 <- out[abs(log2FoldChange) > 2 &
+tmp5 <- out[abs(log2FoldChange) > 1 &
+              padj < 0.05, ]
+# 
+# tmp5_up <- out[log2FoldChange > 1 &
+#               padj < 0.05, ]
+# 
+# tmp5_down <- out[log2FoldChange < -1 &
+#               padj < 0.05, ]
+```
+
+#### Calculate the mean expressions of the selected genes
+```{r}
+tmp <- dt_rna_cod[gene_name %in% tmp5$gene_name, ]
+tmp <- melt.data.table(data = tmp,
+                       id.vars = 1,
+                       measure.vars = 11:ncol(tmp),
+                       variable.name = "sample_names",
+                       value.name = "Hits")
+
+tmp <- merge(tmp,
+             rnaseq_meta_clin,
+             by = "sample_names")
+```
+
+```{r,fig.width=10,fig.height=10}
+p1 <- ggplot(tmp,
+             aes(x = `Study Group`,
+                 y = log2(Hits + 1))) +
+  facet_wrap(~ gene_name,
+             scale = "free_y") +
+  geom_boxplot(width = 0.3,
+               outlier.shape = "") +
+  geom_point(aes(fill = AnyDM,
+                 group = sample_names),
+             size = 2,
+             shape = 21,
+             alpha = 0.5,
+             position = position_dodge(0.3)) +
+  scale_y_continuous("Number of hits",
+                     breaks = seq(from = 1,
+                                  to = 20,
+                                  by = 2),
+                     labels = (2^seq(from = 1,
+                                     to = 20,
+                                     by = 2)) - 1) +
+  scale_fill_discrete("Any DM",
+                      breaks = c(0, 1),
+                      labels = c("No",
+                                 "Yes")) +
+  ggtitle(paste(c("Genes significantly differentially expressed in COVID-19 vs non-COVID patients.",
+                  "Difference of the means of log2[hits+1] > 1 and adjusted p-value < 0.05"),
+                collapse = "\n"))+
+  theme_bw() +
+  theme(legend.position = "bottom")
+
+tiff(filename = "tmp/fig1_sign_genes_cod.tiff",
+     height = 10,
+     width = 10,
+     units = 'in',
+     res = 600,
+     compression = "lzw+p")
+print(p1)
+graphics.off()
+
+p1
+```
+
+```{r,fig.height=5,fig.width=8}
+p2 <- ggplot(tmp[gene_name == "IFI27", ],
+             aes(x = `Study Group`,
+                 y = log2(Hits + 1))) +
+  geom_boxplot(width = 0.3,
+               outlier.shape = "") +
+  geom_point(aes(fill = Expired,
+                 group = sample_names),
+             size = 3,
+             shape = 21,
+             alpha = 0.8,
+             position = position_dodge(0.3)) +
+  scale_y_continuous("Number of hits",
+                     breaks = seq(from = 1,
+                                  to = 20,
+                                  by = 2),
+                     labels = (2^seq(from = 1,
+                                     to = 20,
+                                     by = 2)) - 1) +
+  scale_fill_discrete("In-Hospital Death",
+                      breaks = c(0, 1),
+                      labels = c("No",
+                                 "Yes")) +
+  ggtitle(paste(c("IFI27 expression in COVID-19 vs non-COVID patients.",
+                  "Difference of the means of log2[hits+1] > 1",
+                  "and adjusted p-value < 0.05"),
+                collapse = "\n")) +
+  theme_bw() +
+  theme(legend.position = "bottom")
+
+p3 <- ggplot(tmp[gene_name == "IFI27", ],
+             aes(x = `Study Group`,
+                 y = log2(Hits + 1))) +
+  geom_boxplot(width = 0.3,
+               outlier.shape = "") +
+  geom_point(aes(fill = `Critical Care`,
+                 group = sample_names),
+             size = 3,
+             shape = 21,
+             alpha = 0.8,
+             position = position_dodge(0.3)) +
+  scale_y_continuous("Number of hits",
+                     breaks = seq(from = 1,
+                                  to = 20,
+                                  by = 2),
+                     labels = (2^seq(from = 1,
+                                     to = 20,
+                                     by = 2)) - 1) +
+  scale_fill_discrete("Critical Care",
+                      breaks = c(0, 1),
+                      labels = c("No",
+                                 "Yes")) +
+  ggtitle(paste(c("IFI27 expression in COVID-19 vs non-COVID patients.",
+                  "Difference of the means of log2[hits+1] > 1",
+                  "and adjusted p-value < 0.05"),
+                collapse = "\n")) +
+  theme_bw() +
+  theme(legend.position = "bottom")
+
+tiff(filename = "tmp/fig2_ifi27_covid_noncovid.tiff",
+     height = 6,
+     width = 9,
+     units = 'in',
+     res = 600,
+     compression = "lzw+p")
+grid.arrange(p2,
+             p3,
+             nrow = 1)
+# grid.arrange(p2,
+#              p3,
+#              nrow = 1,
+#              top = textGrob(paste(c("IFI27 expression in COVID-19 vs non-COVID patients.",
+#                                     "Difference of the means of log2[hits+1] > 1",
+#                                     "and adjusted p-value < 0.05"),
+#                                   collapse = "\n"),
+#                             gp = gpar(fontsize = 20,
+#                                       font = 3)))
+graphics.off()
+
+grid.arrange(p2,
+             p3,
+             nrow = 1)
+```
+
+#### Table 3: COVID/non-COVID significant DEs
+```{r}
+# mu <- tmp[, .(mu = exp(mean(log(Hits + 1))) - 1,
+#               med = median(Hits)),
+#               by = list(gene_name,
+#                         Cohort)]
+# mu
+
+med <- tmp[, .(med = median(Hits)),
+              by = list(gene_name,
+                        Cohort)]
+med <- dcast.data.table(data = med,
+                       gene_name ~ Cohort,
+                       value.var = "med")
+med
+
+t3 <- data.table(gene_name = tmp5$gene_name,
+                 `Log2 Fold Change` = round(tmp5$log2FoldChange, 2),
+                 `SE of Log2 Fold Change` = round(tmp5$log2FoldChangeSE, 2),
+                 `Adjusted p-Value` = round(tmp5$padj, 3))
+
+t3 <- merge(med,
+            t3,
+            by = "gene_name")
+
+names(t3)[1:3] <- c("Gene",
+               "Median hits in non-COVID",
+               "Median hits in COVID")
+
+write.csv(t3,
+          file = "tmp/t3.csv",
+          row.names = FALSE)
+t3
+```
+
+### DESeq: AnyDM/no DM
+```{r}
+tmp <- as.matrix(dt_rna_cod[, ndx, with = FALSE])
+rownames(tmp) <- dt_rna_cod$gene_id
+
+dds_cod_dm <- DESeqDataSetFromMatrix(countData = tmp, 
+                                     colData = rnaseq_meta_clin,
+                                     ~ AnyDM)
+```
+
+#### Filter out genes with small number of hits
+```{r}
+keep <- rowSums(counts(dds_cod_dm) >= 10) >= 10
+sum(keep)
+
+dds_cod_dm <- dds_cod_dm[keep, ]
+```
+
+#### Run DESeq
+```{r}
+deseq_cod_dm <- DESeq(dds_cod_dm)
+
+resultsNames(deseq_cod_dm)
+```
+
+#### DESeq results
+```{r}
+res_dm <- results(deseq_cod_dm)
+res_dm[1:10, ]
+rownames(res_dm)[1:10]
+```
+
+```{r}
+out_dm <- data.table(gene_id = rownames(res_dm),
+                  baseMean = res_dm$baseMean,
+                  log2FoldChange = res_dm$log2FoldChange,
+                  log2FoldChangeSE = res_dm$lfcSE,
+                  stat = res_dm$stat,
+                  pvalue = res_dm$pvalue,
+                  padj = res_dm$padj)
+
+out_dm <- merge(dt_rna_cod[, c("gene_name",
+                            "gene_id")],
+             out_dm,
+             by = "gene_id")
+
+out_dm <- out_dm[!is.na(padj), ]
+
+setorder(out_dm, 
+         padj)
+
+
+head(out_dm)
+
+write.csv(out_dm,
+          file = "tmp/deseq2_cod_dm.CSV",
+          row.names = FALSE)
+```
+
+```{r}
+tmp6 <- out_dm[abs(log2FoldChange) > 1 &
               padj < 0.05, ]
 ```
 
+#### Calculate the mean expressions of the selected genes
+```{r}
+tmp <- dt_rna_cod[gene_name %in% tmp6$gene_name, ]
+tmp <- melt.data.table(data = tmp,
+                       id.vars = 1,
+                       measure.vars = 11:ncol(tmp),
+                       variable.name = "sample_names",
+                       value.name = "Hits")
+
+tmp <- merge(tmp,
+             rnaseq_meta_clin,
+             by = "sample_names")
+```
+
+#### Table 3: DM/no DM significant DEs
+```{r}
+med <- tmp[, .(med = median(Hits)),
+           by = list(gene_name,
+                     Cohort)]
+med <- dcast.data.table(data = med,
+                        gene_name ~ Cohort,
+                        value.var = "med")
+med
+
+t4 <- data.table(gene_name = tmp6$gene_name,
+                 `Log2 Fold Change` = round(tmp6$log2FoldChange, 2),
+                 `SE of Log2 Fold Change` = round(tmp6$log2FoldChangeSE, 2),
+                 `Adjusted p-Value` = round(tmp6$padj, 3))
+
+t4 <- merge(med,
+            t4,
+            by = "gene_name")
+
+names(t4)[1:3] <- c("Gene",
+                    "Median hits in non-COVID",
+                    "Median hits in COVID")
+
+write.csv(t4,
+          file = "tmp/t4.csv",
+          row.names = FALSE)
+t4
+```
+
+```{r}
+sum(t4$`Log2 Fold Change` > 0)
+sum(t4$`Log2 Fold Change` < 0)
+```
+
+### DE in COVID and DM
+```{r}
+covid_and_dm <- t4$Gene[t4$Gene %in% t3$Gene]
+covid_and_dm
+```
+
+```{r}
+dt_f3 <- dt_rna_cod[gene_name %in% covid_and_dm, ]
+
+dt_f3 <- melt.data.table(data = dt_f3,
+                         id.vars = 1,
+                         measure.vars = 11:ncol(dt_f3),
+                         variable.name = "sample_names",
+                         value.name = "Hits")
+dt_f3 <- merge(dt_f3,
+               rnaseq_meta_clin,
+               by = "sample_names")
+```
+
+```{r,fig.height=10,fig.width=6}
+p4 <- ggplot(dt_f3,
+             aes(x = Cohort,
+                 y = log2(Hits + 1))) +
+  facet_wrap(~ gene_name,
+             scale = "free_y",
+             ncol = 1) +
+  geom_boxplot(width = 0.3,
+               outlier.shape = "") +
+  geom_point(aes(fill = AnyDM,
+                 group = sample_names),
+             size = 2,
+             shape = 21,
+             alpha = 0.7,
+             position = position_dodge(0.3)) +
+  scale_x_discrete("COVID",
+                   breaks = c("No_COVID",
+                              "COVID"),
+                   labels = c("No",
+                              "Yes")) +
+  scale_y_continuous("Number of hits",
+                     breaks = seq(from = 1,
+                                  to = 20,
+                                  by = 2),
+                     labels = (2^seq(from = 1,
+                                     to = 20,
+                                     by = 2)) - 1) +
+  scale_fill_discrete("Any DM",
+                      breaks = c(0, 1),
+                      labels = c("No",
+                                 "Yes")) +
+  theme_bw() +
+  theme(legend.position = "bottom")
+
+p5 <- ggplot(dt_f3,
+             aes(x = AnyDM,
+                 y = log2(Hits + 1))) +
+  facet_wrap(~ gene_name,
+             scale = "free_y",
+             ncol = 1) +
+  geom_boxplot(width = 0.3,
+               outlier.shape = "") +
+  geom_point(aes(fill = Cohort,
+                 group = sample_names),
+             size = 2,
+             shape = 21,
+             alpha = 0.7,
+             position = position_dodge(0.3)) +
+  scale_x_discrete("Any DM",
+                   breaks = c(0, 1),
+                   labels = c("No",
+                              "Yes")) +
+  scale_y_continuous("Number of hits",
+                     breaks = seq(from = 1,
+                                  to = 20,
+                                  by = 2),
+                     labels = (2^seq(from = 1,
+                                     to = 20,
+                                     by = 2)) - 1) +
+  scale_fill_discrete("COVID",
+                      breaks = c("No_COVID",
+                                 "COVID"),
+                      labels = c("No",
+                                 "Yes")) +
+  theme_bw() +
+  theme(legend.position = "bottom")
+
+tiff(filename = "tmp/fig3_covid_dm.tiff",
+     height = 10,
+     width = 6,
+     units = 'in',
+     res = 600,
+     compression = "lzw+p")
+grid.arrange(p4,
+             p5,
+             nrow = 1)
+graphics.off()
+
+grid.arrange(p4,
+             p5,
+             nrow = 1)
+```
 
 # Session
 ```{r}
