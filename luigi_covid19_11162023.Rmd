@@ -31,6 +31,22 @@ require(gridExtra)
 Javier, 9/15/2023:  
 1. Build survival model using LOS as dates. Assuming all death are in-hospital, end of LOS.  
 
+Meeting 9/19/23:  
+1. Was everybody admitted with COVID-19 symptoms? In Marshall's email from 11/14/23 8:01AM he said "not sure [admission DX] will be necessary since admitting DX will be COVID". Does this mean that controls where also admitted with COVID diagnoses? How?  
+2. Do survival for in-patients only using LOS.  
+3. Look at LOS of dead patients.  
+4. Do DM patients have higher WHO OSCI score at admission?  
+5. COVID+DM = more likely to go to ICU vs COVID+noDM?
+6. Outcomes: death, LOS, ventilation, ICU.  
+
+Meeting 9/7/23:  
+1. Look at inflammation signature w/wo DM, stratified by COVID.  
+2. in COVID, coagulation cascade pathway was affected. See if we can find it in clin. data, ELIZA or RNA-seq. SHould coagulation be considered in COVID pateints' treatment?  
+3. Coding/non-coding gene co-expression.  
+4. Activation of inflammatory pathways because we have transcriptome, not just genome.  
+5. Neanderthals' genes (see Lu's email).  
+6. Important factors: Critical care, WHO OSCI, LOS, ACE inhibitors, age>55, HTN, DM.  
+  
 ```{r}
 # rows_empty <- function(mat) {
 #   unlist(apply(mat, 1, function(x) !any(nzchar(x))), simplify = FALSE)
@@ -835,8 +851,6 @@ rnaseq_meta_clin$Cohort <- factor(rnaseq_meta_clin$Cohort,
 
 ### DESeq: COVID/non-COVID
 ```{r}
-
-
 tmp <- as.matrix(dt_rna_cod[, ndx, with = FALSE])
 rownames(tmp) <- dt_rna_cod$gene_id
 
@@ -1340,6 +1354,122 @@ graphics.off()
 grid.arrange(p4,
              p5,
              nrow = 1)
+```
+
+### DESeq: AnyDM/no DM in COVID patients only
+```{r}
+samples_covid_only <- rnaseq_meta_clin$sample_names[rnaseq_meta_clin$Cohort == "COVID"]
+ndx_covid_only <- which(colnames(dt_rna_cod) %in% samples_covid_only)
+
+tmp <- as.matrix(dt_rna_cod[, ndx_covid_only, with = FALSE])
+rownames(tmp) <- dt_rna_cod$gene_id
+
+dds_cod_dm_covid_only <- DESeqDataSetFromMatrix(countData = tmp, 
+                                                colData = rnaseq_meta_clin[sample_names %in% samples_covid_only],
+                                                ~ AnyDM)
+```
+
+#### Filter out genes with small number of hits
+```{r}
+keep <- rowSums(counts(dds_cod_dm_covid_only) >= 10) >= 10
+sum(keep)
+
+dds_cod_dm_covid_only <- dds_cod_dm_covid_only[keep, ]
+```
+
+#### Run DESeq
+```{r}
+deseq_cod_dm_covid_only <- DESeq(dds_cod_dm_covid_only)
+
+resultsNames(deseq_cod_dm_covid_only)
+```
+
+#### DESeq results
+```{r}
+res_dm_covid_only <- results(deseq_cod_dm_covid_only)
+res_dm_covid_only[1:10, ]
+rownames(res_dm_covid_only)[1:10]
+```
+
+
+```{r}
+out_dm_covid_only <- data.table(gene_id = rownames(res_dm_covid_only),
+                                baseMean = res_dm_covid_only$baseMean,
+                                log2FoldChange = res_dm_covid_only$log2FoldChange,
+                                log2FoldChangeSE = res_dm_covid_only$lfcSE,
+                                stat = res_dm_covid_only$stat,
+                                pvalue = res_dm_covid_only$pvalue,
+                                padj = res_dm_covid_only$padj)
+
+out_dm_covid_only <- merge(dt_rna_cod[, c("gene_name",
+                                          "gene_id")],
+                           out_dm_covid_only,
+                           by = "gene_id")
+
+out_dm_covid_only <- out_dm_covid_only[!is.na(padj), ]
+
+setorder(out_dm_covid_only, 
+         padj)
+
+
+head(out_dm_covid_only)
+
+write.csv(out_dm_covid_only,
+          file = "tmp/deseq2_cod_dm_covid_only.CSV",
+          row.names = FALSE)
+```
+
+```{r}
+tmp7 <- out_dm_covid_only[abs(log2FoldChange) > 1 &
+                            padj < 0.05, ]
+```
+
+#### Calculate the mean expressions of the selected genes
+```{r}
+tmp <- dt_rna_cod[gene_name %in% tmp7$gene_name, ]
+tmp <- melt.data.table(data = tmp,
+                       id.vars = 1,
+                       measure.vars = 11:ncol(tmp),
+                       variable.name = "sample_names",
+                       value.name = "Hits")
+
+tmp <- merge(tmp,
+             rnaseq_meta_clin,
+             by = "sample_names")
+```
+
+#### Table 3: DM/no DM significant DEs
+```{r}
+# med <- tmp[, .(med = median(Hits)),
+#            by = list(gene_name,
+#                      Cohort)]
+# med <- dcast.data.table(data = med,
+#                         gene_name ~ Cohort,
+#                         value.var = "med")
+# med
+# 
+# t4 <- data.table(gene_name = tmp6$gene_name,
+#                  `Log2 Fold Change` = round(tmp6$log2FoldChange, 2),
+#                  `SE of Log2 Fold Change` = round(tmp6$log2FoldChangeSE, 2),
+#                  `Adjusted p-Value` = round(tmp6$padj, 3))
+# 
+# t4 <- merge(med,
+#             t4,
+#             by = "gene_name")
+# 
+# names(t4)[1:3] <- c("Gene",
+#                     "Median hits in non-COVID",
+#                     "Median hits in COVID")
+# 
+# write.csv(t4,
+#           file = "tmp/t4.csv",
+#           row.names = FALSE)
+# t4
+```
+
+```{r}
+# sum(t4$`Log2 Fold Change` > 0)
+# sum(t4$`Log2 Fold Change` < 0)
 ```
 
 # Session
