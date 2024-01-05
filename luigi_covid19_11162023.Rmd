@@ -663,9 +663,12 @@ summary(m8)
 
 ## WHO-OSCI
 ### Desease severity at baseline by WHO-OSCI
-if <5: mild  
-if >+ 5: severe  
-if 8: dead  
+if <5 = mild  
+if >= 5 = severe  
+  5 = very sick  
+  6 = intubated  
+  7 = ventilated  
+if 8: dead   
 
 ```{r}
 covid$who_osci_d1_cat <- "Dead"
