@@ -5,14 +5,14 @@ output: html_notebook
 
 Version: 3.0  
 Created: 9/6/2023  
-Last update: 11/16/2023
+Last update: 01/11/2023
 
 Analysis datasets and copy of the Rmd are in Rutgers box:  
 https://rutgers.app.box.com/folder/227391194192  
 
 GitHub Repo:  
 https://github.com/sargdavid/luigi_covid19  
-  
+
 # Setup
 ```{r setup}
 options(scipen=999)
@@ -22,9 +22,10 @@ require(ggplot2)
 require(table1)
 require(DESeq2)
 
+require(tidyverse)
 require(tidytlg)
-require(gt)
-require(rtables)
+# require(gt)
+# require(rtables)
 require(gridExtra)
 ```
 
@@ -46,7 +47,7 @@ Meeting 9/7/23:
 4. Activation of inflammatory pathways because we have transcriptome, not just genome.  
 5. Neanderthals' genes (see Lu's email).  
 6. Important factors: Critical care, WHO OSCI, LOS, ACE inhibitors, age>55, HTN, DM.  
-  
+
 ```{r}
 # rows_empty <- function(mat) {
 #   unlist(apply(mat, 1, function(x) !any(nzchar(x))), simplify = FALSE)
@@ -118,6 +119,124 @@ Meeting 9/7/23:
 dt1 <- fread("Data/luigi_covid19_clinical_data.csv")
 ```
 
+## Rename DX columns
+```{r}
+ndx <- which(colnames(dt1) %in% "Primary DX")
+colnames(dt1)[ndx] <- paste0("diag",
+                             1:length(ndx))
+```
+
+## Errata
+Corrected as per Luigi's emails
+```{r}
+dt1$COPD[dt1$COPD == 2] <- 1
+dt1$RenalD[dt1$RenalD == 2] <- 1
+dt1$COPD[dt1$COPD == 2] <- 1
+dt1$`Full Dose Anticoagulation`[dt1$`Full Dose Anticoagulation` == 2] <- 1
+
+dt1$`WHO-OSCI DISCHARGE`[dt1$`Real ID` %in% c("457084",
+                                              "771982")] <- 8
+```
+
+# Endpoints
+In-hospital death (Expired)  
+30-day readmission  
+90-day readmission  
+30-day (out-of hospital?) mortality  
+90-day (out-of hospital?) mortality  
+
+NOTE: last 4 only have data for non-COVID patients!  
+2 additional patients died within 30days of discharge (is that correct?). I think it is from the discharge because 7215440	was admitted on 3/17/22, discharged on 5/2/22, and died "within 30 days" so cannot be from admission. 
+
+```{r}
+dt1[dt1$`30 Day Mortality` == 1, ]
+```
+
+NOTE: DX1-40 are for non-COVID patients only.  
+diag1-6 (aka Primary Diagnoses) are for COVID patients only.  
+
+```{r}
+dt1[, c("Study Group",
+        # "Reason_for_Admission",
+        "diag1",
+        "DX1")]
+```
+
+### Remove unused columns
+```{r}
+dt1 <- data.table(`Real ID` = dt1$`Real ID`,
+                  Reason_for_Admission = dt1$DX1,
+                  dt1[, -1])
+
+dt1$Reason_for_Admission[dt1$DX1 == ""] <- dt1$diag1[dt1$DX1 == ""]
+dt1$Reason_for_Admission[dt1$Reason_for_Admission == "#N/A"] <- NA
+```
+
+### Fix Reason for Readmission
+```{r}
+dt1$Reason_for_Admission[dt1$`Study Group` == "COVID" & 
+                           is.na(dt1$Reason_for_Admission)] <- "U07.1"
+
+dt1$Reason_for_Admission[dt1$Reason_for_Admission == "Pelvic Organ Prolapse/N81.9/N81.3"] <- "N81.9"
+dt1$Reason_for_Admission[dt1$Reason_for_Admission == "Altered Mental Status/R41.82"] <- "R41.82"
+dt1$Reason_for_Admission[dt1$Reason_for_Admission == "GI bleed/K92.2"] <- "K92.2"
+dt1$Reason_for_Admission[dt1$Reason_for_Admission == "Hyperglycemia/R73.9"] <- "R73.9"
+dt1$Reason_for_Admission[dt1$Reason_for_Admission == "RLQ Pain/R10. 31"] <- "R10.31"
+dt1$Reason_for_Admission[dt1$Reason_for_Admission == "Altered Mental Status/R41.82"] <- "R41.82"
+dt1$Reason_for_Admission[dt1$Reason_for_Admission == "N/A" ] <- NA
+```
+
+### Save DX1
+```{r}
+diags <- dt1[, .(N = .N),
+             by = list(`Study Group`,
+                       Reason_for_Admission)]
+
+diags <- dcast.data.table(Reason_for_Admission ~ `Study Group`,
+                          value.var = "N",
+                          data = diags)
+
+# diags <- dt1[, .(N = .N),
+#              by = Reason_for_Admission]
+
+write.csv(diags,
+          file = "tmp/diags.csv",
+          row.names = FALSE)
+
+diags
+```
+
+## Reason for admission
+```{r}
+# rfa <- fread("Data/diags_01112024_from_Vahe.csv")
+rfa <- fread("Data/diags_01142024.csv")
+
+rfa <- merge(dt1[, `Real ID`:`WHO-OSCI DISCHARGE`],
+             rfa,
+             by = "Reason_for_Admission",
+             all.x = TRUE)
+
+# dt1 <- merge(dt1,
+#              rfa,
+#              by = "Reason_for_Admission",
+#              all.x = TRUE)
+
+save(rfa,
+     file = "tmp/rfa.RData")
+```
+
+### Delete DX columns
+```{r}
+dt1$diag1 <- NULL
+dt1$diag2 <- NULL
+dt1$diag3 <- NULL
+dt1$diag4 <- NULL
+dt1$diag5 <- NULL
+dt1$diag6 <- NULL
+
+dt1 <- dt1[, `Real ID`:`TNF beta`]
+```
+
 ### Format clinical variables
 ```{r}
 dt1$`Real ID` <- as.character(dt1$`Real ID`)
@@ -127,7 +246,6 @@ dt1$`Whole Blood` <- factor(dt1$`Whole Blood`,
 
 dt1$Plasma <- factor(dt1$Plasma)
 
-# COVID = 0/1
 dt1$`Study Group` <- factor(dt1$`Study Group`,
                             levels = c("No COVID",
                                        "COVID"))
@@ -137,6 +255,12 @@ dt1$`Inpatient=1, ER=2, OP=3` <- factor(dt1$`Inpatient=1, ER=2, OP=3`,
                                                    "ER",
                                                    "OP"))
 
+dt1$`Admit Date` <- as.Date(as.character(dt1$`Admit Date`),
+                            "%m/%d/%Y")
+
+dt1$`Discharge Date` <- as.Date(as.character(dt1$`Discharge Date`),
+                                "%m/%d/%Y")
+
 dt1$Sex <- factor(dt1$Sex,
                   levels = c("Male",
                              "Female"))
@@ -144,30 +268,40 @@ dt1$Sex <- factor(dt1$Sex,
 dt1$Race <- factor(dt1$Race,
                    levels = c("White Non-Hispanic",
                               "Black",
-                              "Indian/Asian",
-                              "Other",
-                              "Unknown"))
+                              "Asian",
+                              "Hispanic",
+                              "Other"))
 
 dt1$`If BMI ?30 Obesity Class (I,II,III)` <- factor(dt1$`If BMI ?30 Obesity Class (I,II,III)`,
                                                     levels = c("I",
                                                                "II",
                                                                "III"))
 
-# !!!GET LABELS!!!
 dt1$Vaccinated <- factor(dt1$Vaccinated,
-                         levels = c(0, 1, 9))
+                         levels = c(0, 1),
+                         labels = c("No",
+                                    "Yes"))
 
 dt1$`Dose #1` <- factor(dt1$`Dose #1`,
-                        levels = c(0, 1, 9))
+                        levels = c(0, 1),
+                        labels = c("No",
+                                   "Yes"))
 
 dt1$`Dose #2` <- factor(dt1$`Dose #2`,
-                        levels = c(0, 1, 9))
+                        levels = c(0, 1),
+                        labels = c("No",
+                                   "Yes"))
 
 dt1$Booster <- factor(dt1$Booster,
-                      levels = c(0, 1, 9))
+                      levels = c(0, 1, 9),
+                      labels = c("No",
+                                 "Yes",
+                                 "Unknown"))
 
 dt1$`Critical Care` <- factor(dt1$`Critical Care`,
-                              levels = 0:1)
+                              levels = c(0, 1),
+                              labels = c("No",
+                                         "Yes"))
 
 # `ICU LOS` = length of stay in the hospital
 dt1$Still_In_Hospital_08182023 <- is.na(as.numeric(dt1$`ICU LOS`))
@@ -175,7 +309,9 @@ dt1$`ICU LOS` <- as.numeric(dt1$`ICU LOS`)
 
 # Death
 dt1$Expired <- factor(dt1$Expired,
-                      levels = 0:1)
+                      levels = c(0, 1),
+                              labels = c("No",
+                                         "Yes"))
 
 dt1$Wave <- factor(dt1$Wave,
                    levels = c(1:4))
@@ -188,7 +324,7 @@ dt1$`Smoking History (0,1,2)` <- factor(dt1$`Smoking History (0,1,2)`,
 
 # !!! GET LABELS!!!
 dt1$Age_Category <- factor(dt1$Age_Category,
-                               levels = 0:4)
+                           levels = 0:4)
 
 # Co-diagnoses/pre-existing conditions
 dt1$MI <- factor(dt1$MI)
@@ -269,7 +405,6 @@ dt1$`WHO-OSCI D21` <- factor(dt1$`WHO-OSCI D21`,
 dt1$`WHO-OSCI D28` <- factor(dt1$`WHO-OSCI D28`,
                              levels = 0:7)
 
-# What is the scale here? 0-7? but we have 8s!
 dt1$`WHO-OSCI DISCHARGE` <- factor(dt1$`WHO-OSCI DISCHARGE`)
 
 # ELISA: all numeric
@@ -345,7 +480,9 @@ id_no_clin
 
 ### Patient "7215440" has 2 RNA-seq samples. We will use the 2nd one "7215440b" and discard the 1st one "7215440a"
 ```{r}
-dt1[`Real ID` == "7215440"]
+dt1[`Real ID` %in% c("7215440",
+                     "7215440a",
+                     "7215440b")]
 
 rnaseq_meta$`Real ID`[rnaseq_meta$`Real ID` == "7215440b"] <- "7215440"
 rnaseq_meta$`Real ID`[!(rnaseq_meta$`Real ID` %in% dt1$`Real ID`)]
@@ -373,14 +510,6 @@ save(dt_rna,
 
 save(rnaseq_meta,
      file = "Data/rnaseq_meta.RData")
-
-write.csv(dt1,
-          file = "Data/luigi_covid19_clinical_data.csv",
-          row.names = FALSE)
-
-write.csv(dt_rna,
-          file = "Data/luigi_covid19_nra_seq_data.csv",
-          row.names = FALSE)
 ```
 
 ## Clean
@@ -394,24 +523,51 @@ gc()
 load("Data/dt1.RData")
 load("Data/dt_rna.RData")
 load("Data/rnaseq_meta.RData")
+load("Data/rfa.RData")
 ```
 
 # Analysis
 ## Table 1
 ```{r}
 t1 <- table1( ~.| `Study Group` + AnyDM,
-              data = dt1[, c(-1)])
+              data = dt1[, -c("Real ID",
+                              "Reason_for_Admission",
+                              "Admit Date",
+                              "Discharge Date")])
 
 t1
 ```
 
 ```{r}
 write.table (t1 , 
-             file = "Output/table1.csv",
+             file = "tmp/table1.csv",
              col.names = TRUE, 
              row.names = FALSE,
-             append = TRUE,
+             # append = TRUE,
              sep = ',')
+```
+
+## DX1 Analysis
+```{r}
+length(unique(rfa$Level1))
+level1_n <- rfa[, .(N_Level1 = .N),
+                by = list(`Study Group`,
+                          Level1)]
+level1_n <- dcast.data.table(data = level1_n,
+                             Level1 ~ `Study Group`)
+level1_n
+```
+
+```{r}
+length(unique(rfa$Level2))
+level2_n <- rfa[, .(N_Level2 = .N),
+                by = list(`Study Group`,
+                          Level1,
+                          Level2)]
+
+level2_n <- dcast.data.table(data = level2_n,
+                             Level1 + Level2 ~ `Study Group`)
+level2_n
 ```
 
 ## Death
@@ -429,19 +585,19 @@ s1 <- summary(m1)
 ci1 <- confint(m1)
 
 out1 <- data.table(Response = "Dead",
-                    Comparison = "COVID vs. No Covid",
-                    OR = round(exp(s1$coefficients[-1, 1]),
-                               2),
-                    `95% C.I.L.B.` = exp(ci1[2, 1]),
-                    `95% C.I.U.B.` = exp(ci1[2, 2]),
-                    `p-Value` = ifelse(s1$coefficients[-1, 4] >= 0.001,
-                                       round(s1$coefficients[-1, 4],
-                                             3),
-                                       "<0.001"),
-                    sign = ifelse(s1$coefficients[-1, 4] <= 0.05,
-                                  ifelse(s1$coefficients[-1, 4] <= 0.01,
-                                         "**",
-                                         "*"), ""))
+                   Comparison = "COVID vs. No Covid",
+                   OR = round(exp(s1$coefficients[-1, 1]),
+                              2),
+                   `95% C.I.L.B.` = exp(ci1[2, 1]),
+                   `95% C.I.U.B.` = exp(ci1[2, 2]),
+                   `p-Value` = ifelse(s1$coefficients[-1, 4] >= 0.001,
+                                      round(s1$coefficients[-1, 4],
+                                            3),
+                                      "<0.001"),
+                   sign = ifelse(s1$coefficients[-1, 4] <= 0.05,
+                                 ifelse(s1$coefficients[-1, 4] <= 0.01,
+                                        "**",
+                                        "*"), ""))
 
 out1
 ```
@@ -499,18 +655,18 @@ m3 <- glm(Expired ~ `Critical Care`,
 s3 <- summary(m3)
 
 out3 <- data.table(Response = "Dead",
-                    Comparison = c("ICU: Yes vs. No"),
-                    OR = round(exp(s3$coefficients[-1, 1]),
-                               2),
-                    `95% C.I.L.B.` = exp(s3$coefficients[-1, 1] - 1.96*s3$coefficients[-1, 2]),
-                    `95% C.I.U.B.` = exp(s3$coefficients[-1, 1] + 1.96*s3$coefficients[-1, 2]),
-                    `p-Value` = ifelse(s3$coefficients[-1, 4] >= 0.001,
-                                       round(s3$coefficients[-1, 4], 3),
-                                       "<0.001"),
-                    sign = ifelse(s3$coefficients[-1, 4] <= 0.05,
-                                  ifelse(s3$coefficients[-1, 4] <= 0.01,
-                                         "**",
-                                         "*"), ""))
+                   Comparison = c("ICU: Yes vs. No"),
+                   OR = round(exp(s3$coefficients[-1, 1]),
+                              2),
+                   `95% C.I.L.B.` = exp(s3$coefficients[-1, 1] - 1.96*s3$coefficients[-1, 2]),
+                   `95% C.I.U.B.` = exp(s3$coefficients[-1, 1] + 1.96*s3$coefficients[-1, 2]),
+                   `p-Value` = ifelse(s3$coefficients[-1, 4] >= 0.001,
+                                      round(s3$coefficients[-1, 4], 3),
+                                      "<0.001"),
+                   sign = ifelse(s3$coefficients[-1, 4] <= 0.05,
+                                 ifelse(s3$coefficients[-1, 4] <= 0.01,
+                                        "**",
+                                        "*"), ""))
 
 out3
 
@@ -539,7 +695,7 @@ out31
 ### Death vs. COVID | Diabetes
 No significant difference.  
 Model with interaction is worse.  
-  
+
 ```{r}
 m2 <- glm(Expired ~ `Study Group` +
             AnyDM,
@@ -548,19 +704,19 @@ m2 <- glm(Expired ~ `Study Group` +
 s2 <- summary(m2)
 
 out2 <- data.table(Response = "Dead",
-                    Comparison = c("COVID vs. No Covid",
-                                   "Any DM vs. No DM"),
-                    OR = round(exp(s2$coefficients[-1, 1]),
-                               2),
-                    `95% C.I.L.B.` = exp(s2$coefficients[-1, 1] - 1.96*s2$coefficients[-1, 2]),
-                    `95% C.I.U.B.` = exp(s2$coefficients[-1, 1] + 1.96*s2$coefficients[-1, 2]),
-                    `p-Value` = ifelse(s2$coefficients[-1, 4] >= 0.001,
-                                       round(s2$coefficients[-1, 4], 3),
-                                       "<0.001"),
-                    sign = ifelse(s2$coefficients[-1, 4] <= 0.05,
-                                  ifelse(s2$coefficients[-1, 4] <= 0.01,
-                                         "**",
-                                         "*"), ""))
+                   Comparison = c("COVID vs. No Covid",
+                                  "Any DM vs. No DM"),
+                   OR = round(exp(s2$coefficients[-1, 1]),
+                              2),
+                   `95% C.I.L.B.` = exp(s2$coefficients[-1, 1] - 1.96*s2$coefficients[-1, 2]),
+                   `95% C.I.U.B.` = exp(s2$coefficients[-1, 1] + 1.96*s2$coefficients[-1, 2]),
+                   `p-Value` = ifelse(s2$coefficients[-1, 4] >= 0.001,
+                                      round(s2$coefficients[-1, 4], 3),
+                                      "<0.001"),
+                   sign = ifelse(s2$coefficients[-1, 4] <= 0.05,
+                                 ifelse(s2$coefficients[-1, 4] <= 0.01,
+                                        "**",
+                                        "*"), ""))
 
 out2
 ```
@@ -575,20 +731,20 @@ s4 <- summary(m4)
 ci4 <- confint(m4)
 
 out4 <- data.table(Response = "Dead",
-                    Comparison = c("COVID vs. No Covid",
-                                   "ICU"),
-                    OR = round(exp(s4$coefficients[-1, 1]),
-                               2),
-                    `95% C.I.L.B.` = exp(ci4[-1, 1]),
-                    `95% C.I.U.B.` = exp(ci4[-1, 2]),
-                    `p-Value` = ifelse(s4$coefficients[-1, 4] >= 0.001,
-                                       round(s4$coefficients[-1, 4],
-                                             3),
-                                       "<0.001"),
-                    sign = ifelse(s4$coefficients[-1, 4] <= 0.05,
-                                  ifelse(s4$coefficients[-1, 4] <= 0.01,
-                                         "**",
-                                         "*"), ""))
+                   Comparison = c("COVID vs. No Covid",
+                                  "ICU"),
+                   OR = round(exp(s4$coefficients[-1, 1]),
+                              2),
+                   `95% C.I.L.B.` = exp(ci4[-1, 1]),
+                   `95% C.I.U.B.` = exp(ci4[-1, 2]),
+                   `p-Value` = ifelse(s4$coefficients[-1, 4] >= 0.001,
+                                      round(s4$coefficients[-1, 4],
+                                            3),
+                                      "<0.001"),
+                   sign = ifelse(s4$coefficients[-1, 4] <= 0.05,
+                                 ifelse(s4$coefficients[-1, 4] <= 0.01,
+                                        "**",
+                                        "*"), ""))
 
 out4
 ```
@@ -596,8 +752,8 @@ out4
 No significance in interaction model.
 ```{r}
 m41 <- glm(Expired ~ `Study Group`*`Critical Care`,
-          family = binomial,
-          data = dt1)
+           family = binomial,
+           data = dt1)
 summary(m41)
 ```
 
@@ -665,9 +821,9 @@ summary(m8)
 ### Desease severity at baseline by WHO-OSCI
 if <5 = mild  
 if >= 5 = severe  
-  5 = very sick  
-  6 = intubated  
-  7 = ventilated  
+5 = very sick  
+6 = intubated  
+7 = ventilated  
 if 8: dead   
 
 ```{r}
@@ -676,8 +832,8 @@ covid$who_osci_d1_cat[as.numeric(as.character(covid$`WHO-OSCI D1`)) < 8] <- "Sev
 covid$who_osci_d1_cat[as.numeric(as.character(covid$`WHO-OSCI D1`)) < 5] <- "Mild"
 
 covid$who_osci_d1_cat <- factor(covid$who_osci_d1_cat,
-                             levels = c("Mild",
-                                        "Severe"))
+                                levels = c("Mild",
+                                           "Severe"))
 summary(covid$who_osci_d1_cat)
 ```
 
@@ -705,7 +861,7 @@ tmp <- melt.data.table(tmp,
                        variable.name = "Day",
                        value.name = "WHO_OSCI")
 tmp$Day <- factor(tmp$Day,
-                       levels = unique(tmp$Day))
+                  levels = unique(tmp$Day))
 
 tmp <- tmp[!is.na(tmp$WHO_OSCI), ]
 ggplot(tmp,
@@ -726,10 +882,11 @@ table(dt1$`WHO-OSCI D1`,
       dt1$Expired)
 ```
 
+### Table 2
 ```{r}
 t2 <- dcast.data.table(`Real ID` ~ Day,
-                 value.var = "WHO_OSCI",
-                 data = tmp[Expired == 1, ])
+                       value.var = "WHO_OSCI",
+                       data = tmp[Expired == "Yes", ])
 
 write.csv(t2,
           file = "tmp/table2.csv",
@@ -773,7 +930,7 @@ dt1$LOS[dt1$`Real ID` == 771982]
 
 # RNA-seq
 https://bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html  
-  
+
 ## Merge RNA-seq meta-data with clinical
 ```{r}
 rnaseq_meta_clin <- merge(rnaseq_meta,
@@ -858,8 +1015,8 @@ tmp <- as.matrix(dt_rna_cod[, ndx, with = FALSE])
 rownames(tmp) <- dt_rna_cod$gene_id
 
 dds_cod <- DESeqDataSetFromMatrix(countData = tmp, 
-                              colData = rnaseq_meta_clin,
-                              ~ Cohort)
+                                  colData = rnaseq_meta_clin,
+                                  ~ Cohort)
 ```
 
 #### Filter out genes with small number of hits
@@ -1119,11 +1276,11 @@ grid.arrange(p2,
 # mu
 
 med <- tmp[, .(med = median(Hits)),
-              by = list(gene_name,
-                        Cohort)]
+           by = list(gene_name,
+                     Cohort)]
 med <- dcast.data.table(data = med,
-                       gene_name ~ Cohort,
-                       value.var = "med")
+                        gene_name ~ Cohort,
+                        value.var = "med")
 med
 
 t3 <- data.table(gene_name = tmp5$gene_name,
@@ -1136,8 +1293,8 @@ t3 <- merge(med,
             by = "gene_name")
 
 names(t3)[1:3] <- c("Gene",
-               "Median hits in non-COVID",
-               "Median hits in COVID")
+                    "Median hits in non-COVID",
+                    "Median hits in COVID")
 
 write.csv(t3,
           file = "tmp/t3.csv",
@@ -1179,17 +1336,17 @@ rownames(res_dm)[1:10]
 
 ```{r}
 out_dm <- data.table(gene_id = rownames(res_dm),
-                  baseMean = res_dm$baseMean,
-                  log2FoldChange = res_dm$log2FoldChange,
-                  log2FoldChangeSE = res_dm$lfcSE,
-                  stat = res_dm$stat,
-                  pvalue = res_dm$pvalue,
-                  padj = res_dm$padj)
+                     baseMean = res_dm$baseMean,
+                     log2FoldChange = res_dm$log2FoldChange,
+                     log2FoldChangeSE = res_dm$lfcSE,
+                     stat = res_dm$stat,
+                     pvalue = res_dm$pvalue,
+                     padj = res_dm$padj)
 
 out_dm <- merge(dt_rna_cod[, c("gene_name",
-                            "gene_id")],
-             out_dm,
-             by = "gene_id")
+                               "gene_id")],
+                out_dm,
+                by = "gene_id")
 
 out_dm <- out_dm[!is.na(padj), ]
 
@@ -1206,7 +1363,7 @@ write.csv(out_dm,
 
 ```{r}
 tmp6 <- out_dm[abs(log2FoldChange) > 1 &
-              padj < 0.05, ]
+                 padj < 0.05, ]
 ```
 
 #### Calculate the mean expressions of the selected genes
