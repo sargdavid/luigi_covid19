@@ -152,6 +152,10 @@ NOTE: last 4 only have data for non-COVID patients!
 dt1[dt1$`30 Day Mortality` == 1, ]
 ```
 
+```{r}
+dt1[dt1$`90 Day Mortality` == 1, ]
+```
+
 NOTE: DX1-40 are for non-COVID patients only.  
 diag1-6 (aka Primary Diagnoses) are for COVID patients only.  
 
@@ -162,17 +166,18 @@ dt1[, c("Study Group",
         "DX1")]
 ```
 
-### Remove unused columns
+### Create Reason for Admission and DX2
 ```{r}
 dt1 <- data.table(`Real ID` = dt1$`Real ID`,
                   Reason_for_Admission = dt1$DX1,
+                  Adm_DX2 = dt1$DX2,
                   dt1[, -1])
 
 dt1$Reason_for_Admission[dt1$DX1 == ""] <- dt1$diag1[dt1$DX1 == ""]
 dt1$Reason_for_Admission[dt1$Reason_for_Admission == "#N/A"] <- NA
 ```
 
-### Fix Reason for Readmission
+### Fix Reason for Admission
 ```{r}
 dt1$Reason_for_Admission[dt1$`Study Group` == "COVID" & 
                            is.na(dt1$Reason_for_Admission)] <- "U07.1"
@@ -184,6 +189,12 @@ dt1$Reason_for_Admission[dt1$Reason_for_Admission == "Hyperglycemia/R73.9"] <- "
 dt1$Reason_for_Admission[dt1$Reason_for_Admission == "RLQ Pain/R10. 31"] <- "R10.31"
 dt1$Reason_for_Admission[dt1$Reason_for_Admission == "Altered Mental Status/R41.82"] <- "R41.82"
 dt1$Reason_for_Admission[dt1$Reason_for_Admission == "N/A" ] <- NA
+```
+
+### DX2
+```{r}
+dt1$Adm_DX2[dt1$DX1 == ""] <- dt1$diag2[dt1$DX1 == ""]
+dt1$Adm_DX2[dt1$DX2 == "#N/A"] <- NA
 ```
 
 ### Save DX1
@@ -532,6 +543,7 @@ load("Data/rfa.RData")
 t1 <- table1( ~.| `Study Group` + AnyDM,
               data = dt1[, -c("Real ID",
                               "Reason_for_Admission",
+                              "Adm_DX2",
                               "Admit Date",
                               "Discharge Date")])
 
@@ -979,6 +991,34 @@ dt1[LOS > 1,
 dt1$LOS[dt1$`Real ID` == 771982]
 ```
 
+
+
+# ELISA
+```{r}
+dt_elisa <- data.table(dt1[, c("Real ID",
+                               "Study Group")],
+                       dt1[, `G-CSF (CSF-3)`:`TNF beta`])
+
+summary(dt_elisa)
+
+for (i in 3:ncol(dt_elisa)) {
+  hist(dt_elisa[, 
+                c(i),
+                with = FALSE][[1]],
+       20,
+       main = colnames(dt_elisa)[i])
+}
+
+for (i in 3:ncol(dt_elisa)) {
+  hist(log10(dt_elisa[, 
+                c(i),
+                with = FALSE][[1]] + 1),
+       20,
+       main = colnames(dt_elisa)[i])
+}
+```
+
+
 # RNA-seq
 https://bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html  
 
@@ -1046,6 +1086,62 @@ dt_rna_cod <- rbindlist(list(dt_rna_cod,
 length(unique(dt_rna_cod$gene_name))
 nrow(dt_rna_cod)
 ```
+
+```{r}
+tmp <- data.table(sample_names = colnames(dt_rna_cod)[11:ncol(dt_rna_cod)],
+                  BAMBI = dt_rna_cod[gene_name == "BAMBI", c(11:ncol(dt_rna_cod))])
+tmp <- merge(rnaseq_meta,
+             tmp,
+             by = "sample_names")
+
+tmp2 <- fread("Data/COVID study Master sheet w ELISA data 2_1-24.csv")
+
+tmp2$`Real ID` <- as.character(tmp2$`Real ID`)
+
+tmp <- merge(tmp,
+             tmp2[, c("Real ID",
+                      "ACE2 (ng/ml)")],
+             by = "Real ID")
+
+tmp$`ACE2 (ng/ml)` <- as.numeric(tmp$`ACE2 (ng/ml)`)
+
+tmp <- merge(tmp,
+             dt1[, c("Real ID",
+                     "Study Group",
+                     "ACEis")],
+             by = "Real ID")
+```
+
+```{r}
+plot(tmp$BAMBI ~ log10(tmp$`ACE2 (ng/ml)` + 1))
+
+ggplot(tmp,
+       aes(x = log10(`ACE2 (ng/ml)` + 1),
+           y = BAMBI,
+           fill = `Study Group`)) +
+  geom_point(shape = 21,
+               size = 3) +
+  theme_bw()
+
+
+ggplot(tmp,
+       aes(y = BAMBI,
+           x = `Study Group`,
+           group = 1:nrow(tmp))) +
+  geom_point() +
+  theme_bw()
+
+ggplot(tmp,
+       aes(y = BAMBI,
+           x = `Study Group`,
+           group = 1:nrow(tmp),
+           fill = ACEis)) +
+  geom_point(size = 3,
+             shape = 21,
+             position = position_dodge(0.3)) +
+  theme_bw()
+```
+
 
 ### Prepare DESeq object
 ```{r}
