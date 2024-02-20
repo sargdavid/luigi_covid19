@@ -17,16 +17,25 @@ https://github.com/sargdavid/luigi_covid19
 ```{r setup}
 options(scipen=999)
 
+# if (!require("BiocManager",
+#              quietly = TRUE))
+#   install.packages("BiocManager")
+# BiocManager::install("ReactomePA")
+# BiocManager::install("org.Hs.eg.db")
+
 require(data.table)
 require(ggplot2)
 require(table1)
 require(DESeq2)
+require(ReactomePA)
+require(org.Hs.eg.db)
 
 require(tidyverse)
 require(tidytlg)
 # require(gt)
 # require(rtables)
 require(gridExtra)
+require(nnet)
 ```
 
 Javier, 9/15/2023:  
@@ -996,19 +1005,32 @@ dt1$LOS[dt1$`Real ID` == 771982]
 # ELISA
 ```{r}
 dt_elisa <- data.table(dt1[, c("Real ID",
-                               "Study Group")],
+                               "Study Group",
+                               "AnyDM")],
                        dt1[, `G-CSF (CSF-3)`:`TNF beta`])
 
 summary(dt_elisa)
 
-for (i in 3:ncol(dt_elisa)) {
-  hist(dt_elisa[, 
+# Remove patients with no ELISA data
+dt_elisa <- dt_elisa[!is.na(`G-CSF (CSF-3)`), ]
+
+addmargins(table(COVID = dt_elisa$`Study Group`,
+      AnyDM = dt_elisa$AnyDM))
+```
+
+## Plot protein concentrations
+```{r}
+for (i in 4:ncol(dt_elisa)) {
+  hist(dt_elisa[,
                 c(i),
                 with = FALSE][[1]],
        20,
        main = colnames(dt_elisa)[i])
 }
+```
 
+## Plot log10 protein concentrations
+```{r}
 for (i in 3:ncol(dt_elisa)) {
   hist(log10(dt_elisa[, 
                 c(i),
@@ -1018,6 +1040,177 @@ for (i in 3:ncol(dt_elisa)) {
 }
 ```
 
+## Boxplots of log10 concentrations
+```{r}
+out <- list()
+for (i in 4:ncol(dt_elisa)) {
+  
+  tmp <- data.table(id = dt_elisa$`Real ID`,
+                    covid = dt_elisa$`Study Group`,
+                    dm = factor(dt_elisa$AnyDM,
+                                levels = 0:1,
+                                labels = c("No DM",
+                                           "DM")),
+                    resp = log10(dt_elisa[, c(i), with = FALSE][[1]] + 0.01))
+
+  p1 <- ggplot(tmp,
+               aes(x = covid,
+                   y = resp)) +
+    facet_wrap(~ dm) +
+    geom_boxplot(outlier.shape = "") +
+    geom_point(aes(fill = covid,
+                   group = id,),
+               shape = 21,
+               size = 3,
+               alpha = 0.7,
+               position = position_dodge(0.3)) +
+    ggtitle(colnames(dt_elisa)[i]) +
+    theme_bw()
+  print(p1)
+  
+  s1 <- summary(lm(resp ~ covid*dm,
+                   data = tmp))
+  
+  out[[i- 3]] <- data.table(protein = colnames(dt_elisa)[i],
+                            comparison = c("COVID - non-COVID",
+                                           "DM - non-DM",
+                                           "COVID*DM Interaction"),
+                            diff = round(s1$coefficients[-1, 1], 3),
+                            se_diff = round(s1$coefficients[-1, 2], 3),
+                            pval = round(s1$coefficients[-1, 4], 3))
+}
+```
+
+## LM results
+```{r}
+res <- rbindlist(out)
+# res$pval[res$pval == 0] <- "<0.001"
+res
+```
+
+## ELISA PCA
+### PCA
+```{r}
+m1 <- prcomp(dt_elisa[, -c(1:3)],
+             center = TRUE,
+             scale. = TRUE)
+summary(m1)
+```
+
+### Scores (i.e. points)
+```{r}
+dt_scr <- data.table(m1$x[, 1:2])
+dt_scr$covid <- dt_elisa$`Study Group`
+dt_scr$dm <- factor(dt_elisa$AnyDM,
+                    levels = 0:1,
+                    labels = c("No DM",
+                               "DM"))
+head(dt_scr)
+```
+
+### Loading (i.e. arrows)
+```{r}
+dt_rot <- as.data.frame(m1$rotation[, 1:2])
+dt_rot$feat <- rownames(dt_rot)
+dt_rot <- data.table(dt_rot)
+dt_rot
+```
+
+### Axis labels
+```{r}
+u.axis.labs <- paste(colnames(dt_rot)[1:2], 
+                     sprintf('(%0.1f%% explained var.)', 
+                             100*m1$sdev[1:2]^2/sum(m1$sdev^2)))
+u.axis.labs
+```
+
+### Biplot by COVID
+```{r,fig.width=8,fig.height=8}
+grp <- dt_scr$covid
+scl <- 30
+
+p1 <- ggplot(data = dt_rot,
+             aes(x = PC1,
+                 y = PC2)) +
+  coord_equal() +
+  geom_point(data = dt_scr,
+             aes(fill = grp),
+             shape = 21,
+             size = 3,
+             alpha = 0.7) +
+  geom_segment(aes(x = 0,
+                   y = 0,
+                   xend = scl*PC1,
+                   yend = scl*PC2),
+               arrow = arrow(length = unit(1/2, 'picas')),
+               color = "black",
+               size = 0.5) +
+  geom_text(aes(x = 1.1*scl*PC1,
+                y = 1.1*scl*PC2,
+                label = dt_rot$feat),
+            size = 2,
+            hjust = 0.5) +
+  scale_x_continuous(u.axis.labs[1]) +
+  scale_y_continuous(u.axis.labs[2]) +
+  scale_fill_discrete(name = "Group") +
+  ggtitle("Biplot") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5,
+                                  size = 20))
+p1
+# tiff(filename = "tmp/pca_biplot.tiff",
+#      height = 10,
+#      width = 10,
+#      units = 'in',
+#      res = 300,
+#      compression = "lzw+p")
+# print(p1)
+# graphics.off()
+```
+
+### Biplot by COVID
+```{r,fig.width=8,fig.height=8}
+grp <- dt_scr$dm
+scl <- 30
+
+p1 <- ggplot(data = dt_rot,
+             aes(x = PC1,
+                 y = PC2)) +
+  coord_equal() +
+  geom_point(data = dt_scr,
+             aes(fill = grp),
+             shape = 21,
+             size = 3,
+             alpha = 0.7) +
+  geom_segment(aes(x = 0,
+                   y = 0,
+                   xend = scl*PC1,
+                   yend = scl*PC2),
+               arrow = arrow(length = unit(1/2, 'picas')),
+               color = "black",
+               size = 0.5) +
+  geom_text(aes(x = 1.1*scl*PC1,
+                y = 1.1*scl*PC2,
+                label = dt_rot$feat),
+            size = 2,
+            hjust = 0.5) +
+  scale_x_continuous(u.axis.labs[1]) +
+  scale_y_continuous(u.axis.labs[2]) +
+  scale_fill_discrete(name = "Group") +
+  ggtitle("Biplot") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5,
+                                  size = 20))
+p1
+# tiff(filename = "tmp/pca_biplot.tiff",
+#      height = 10,
+#      width = 10,
+#      units = 'in',
+#      res = 300,
+#      compression = "lzw+p")
+# print(p1)
+# graphics.off()
+```
 
 # RNA-seq
 https://bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html  
@@ -1087,61 +1280,28 @@ length(unique(dt_rna_cod$gene_name))
 nrow(dt_rna_cod)
 ```
 
+### Add Entrez ID
+Source: https://github.com/KongLabRUSP/mes13/blob/731b35f3de3ffde4e42d5045fb5fcdf3dfc97d72/mes13_fx_report_v1.Rmd#L589  
+
+see also: https://stackoverflow.com/questions/71131883/r-how-do-i-convert-gene-symbols-to-entrez-ids  
+  
 ```{r}
-tmp <- data.table(sample_names = colnames(dt_rna_cod)[11:ncol(dt_rna_cod)],
-                  BAMBI = dt_rna_cod[gene_name == "BAMBI", c(11:ncol(dt_rna_cod))])
-tmp <- merge(rnaseq_meta,
-             tmp,
-             by = "sample_names")
-
-tmp2 <- fread("Data/COVID study Master sheet w ELISA data 2_1-24.csv")
-
-tmp2$`Real ID` <- as.character(tmp2$`Real ID`)
-
-tmp <- merge(tmp,
-             tmp2[, c("Real ID",
-                      "ACE2 (ng/ml)")],
-             by = "Real ID")
-
-tmp$`ACE2 (ng/ml)` <- as.numeric(tmp$`ACE2 (ng/ml)`)
-
-tmp <- merge(tmp,
-             dt1[, c("Real ID",
-                     "Study Group",
-                     "ACEis")],
-             by = "Real ID")
+# entraz_id <- list()
+# for (i in 1:length(gene_names)) {
+#   out <- try(unlist(mget(x = gene_names[i],
+#                          envir = org.Mm.egALIAS2EG)),
+#              silent = TRUE)
+#   if (class(out)[1] != "try-error") {
+#     # entraz_id[[i]] <- out
+#     entraz_id[[i]] <- data.table(gene = gene_names[i],
+#                                  version = names(out),
+#                                  entraz_id = out)
+#   } 
+#   # else {
+#   #   entraz_id[[i]] <- NA
+#   # }
+# }
 ```
-
-```{r}
-plot(tmp$BAMBI ~ log10(tmp$`ACE2 (ng/ml)` + 1))
-
-ggplot(tmp,
-       aes(x = log10(`ACE2 (ng/ml)` + 1),
-           y = BAMBI,
-           fill = `Study Group`)) +
-  geom_point(shape = 21,
-               size = 3) +
-  theme_bw()
-
-
-ggplot(tmp,
-       aes(y = BAMBI,
-           x = `Study Group`,
-           group = 1:nrow(tmp))) +
-  geom_point() +
-  theme_bw()
-
-ggplot(tmp,
-       aes(y = BAMBI,
-           x = `Study Group`,
-           group = 1:nrow(tmp),
-           fill = ACEis)) +
-  geom_point(size = 3,
-             shape = 21,
-             position = position_dodge(0.3)) +
-  theme_bw()
-```
-
 
 ### Prepare DESeq object
 ```{r}
@@ -1164,6 +1324,13 @@ rownames(tmp) <- dt_rna_cod$gene_id
 dds_cod <- DESeqDataSetFromMatrix(countData = tmp, 
                                   colData = rnaseq_meta_clin,
                                   ~ Cohort)
+```
+
+### Fragments Per Million (FPM)
+```{r}
+dt_fpm <- fpm(object = dds_cod,
+              robust = FALSE)
+colSums(dt_fpm)[1:5]
 ```
 
 #### Filter out genes with small number of hits
@@ -1289,7 +1456,7 @@ tmp <- merge(tmp,
 
 ```{r,fig.width=10,fig.height=10}
 p1 <- ggplot(tmp,
-             aes(x = `Study Group`,
+             aes(x = Cohort,
                  y = log2(Hits + 1))) +
   facet_wrap(~ gene_name,
              scale = "free_y") +
@@ -1332,7 +1499,7 @@ p1
 
 ```{r,fig.height=5,fig.width=8}
 p2 <- ggplot(tmp[gene_name == "IFI27", ],
-             aes(x = `Study Group`,
+             aes(x = Cohort,
                  y = log2(Hits + 1))) +
   geom_boxplot(width = 0.3,
                outlier.shape = "") +
@@ -1361,7 +1528,7 @@ p2 <- ggplot(tmp[gene_name == "IFI27", ],
   theme(legend.position = "bottom")
 
 p3 <- ggplot(tmp[gene_name == "IFI27", ],
-             aes(x = `Study Group`,
+             aes(x = Cohort,
                  y = log2(Hits + 1))) +
   geom_boxplot(width = 0.3,
                outlier.shape = "") +
@@ -1447,6 +1614,76 @@ write.csv(t3,
           file = "tmp/t3.csv",
           row.names = FALSE)
 t3
+```
+
+#### Pathway analysis
+##### Top 18 genes
+Source: https://stackoverflow.com/questions/71131883/r-how-do-i-convert-gene-symbols-to-entrez-ids  
+  
+```{r}
+gene_list_1 <- mapIds(org.Hs.eg.db,
+                      keys = tmp5$gene_name,
+                      column = "ENTREZID",
+                      keytype = "SYMBOL")
+```
+
+```{r}
+rpa1 <- ReactomePA::enrichPathway(gene = gene_list_1,
+                                  readable = TRUE)
+rpa1@result
+
+write.csv(rpa1@result,
+          file = "tmp/rpa1.csv")
+```
+
+```{r}
+barplot(rpa1,
+        showCategory = 10)
+```
+
+
+```{r}
+# for(i in 1:length(rpa1@result$Description)) {
+#   viewPathway(pathName = rpa1@result$Description[i])
+# }
+
+viewPathway(pathName = rpa1@result$Description[1])
+
+geneList1 <- tmp5$log2FoldChange
+names(geneList1) <- gene_list_1
+geneList1 <- geneList1[!is.na(gene_list_1)]
+geneList1
+
+viewPathway(pathName = rpa1@result$Description[1],
+            readable = TRUE,
+            foldChange = geneList1)
+```
+
+##### Top 64 genes
+```{r}
+tmp6 <- out[abs(log2FoldChange) > 0.5 &
+              padj < 0.1, ]
+```
+
+```{r}
+gene_list_2 <- mapIds(org.Hs.eg.db,
+                      keys = tmp6$gene_name,
+                      column = "ENTREZID",
+                      keytype = "SYMBOL")
+gene_list_2
+```
+
+```{r}
+rpa2 <- ReactomePA::enrichPathway(gene = gene_list_2,
+                                  readable = TRUE)
+rpa2@result
+
+write.csv(x = rpa2@result,
+          file = "tmp/rpa2.csv")
+```
+
+```{r}
+barplot(rpa2)
 ```
 
 ### DESeq: AnyDM/no DM
