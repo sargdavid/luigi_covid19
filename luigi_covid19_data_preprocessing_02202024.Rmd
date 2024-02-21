@@ -1,0 +1,544 @@
+---
+title: "Luigi's COVID-19 Data Preprocessing"
+output: html_notebook
+---
+
+Created: 9/6/2023  
+Last update: 02/20/2024
+
+Analysis datasets and copy of the Rmd are in Rutgers box:  
+https://rutgers.app.box.com/folder/227391194192  
+
+GitHub Repo:  
+https://github.com/sargdavid/luigi_covid19  
+
+# Setup
+```{r setup}
+options(scipen=999)
+
+# if (!require("BiocManager",
+#              quietly = TRUE))
+#   install.packages("BiocManager")
+# BiocManager::install("org.Hs.eg.db")
+# BiocManager::install("AnnotationDbi")
+
+require(data.table)
+require(AnnotationDbi)
+require(org.Hs.eg.db)
+```
+
+# Data
+## Clinical variables and ELISA
+```{r}
+dt1 <- fread("Data/luigi_covid19_clinical_data.csv")
+```
+
+## Rename DX columns
+```{r}
+ndx <- which(colnames(dt1) %in% "Primary DX")
+colnames(dt1)[ndx] <- paste0("diag",
+                             1:length(ndx))
+```
+
+## Errata
+Corrected as per Luigi's emails
+```{r}
+dt1$COPD[dt1$COPD == 2] <- 1
+dt1$RenalD[dt1$RenalD == 2] <- 1
+dt1$COPD[dt1$COPD == 2] <- 1
+dt1$`Full Dose Anticoagulation`[dt1$`Full Dose Anticoagulation` == 2] <- 1
+
+dt1$`WHO-OSCI DISCHARGE`[dt1$`Real ID` %in% c("457084",
+                                              "771982")] <- 8
+```
+
+# Endpoints
+In-hospital death (Expired)  
+30-day readmission  
+90-day readmission  
+30-day (out-of hospital?) mortality  
+90-day (out-of hospital?) mortality  
+
+NOTE: last 4 only have data for non-COVID patients!  
+2 additional patients died within 30days of discharge (is that correct?). I think it is from the discharge because 7215440	was admitted on 3/17/22, discharged on 5/2/22, and died "within 30 days" so cannot be from admission. 
+
+```{r}
+dt1[dt1$`30 Day Mortality` == 1, ]
+```
+
+```{r}
+dt1[dt1$`90 Day Mortality` == 1, ]
+```
+
+NOTE: DX1-40 are for non-COVID patients only.  
+diag1-6 (aka Primary Diagnoses) are for COVID patients only.  
+
+```{r}
+dt1[, c("Study Group",
+        # "Reason_for_Admission",
+        "diag1",
+        "DX1")]
+```
+
+### Create Reason for Admission and DX2
+```{r}
+dt1 <- data.table(`Real ID` = dt1$`Real ID`,
+                  Reason_for_Admission = dt1$DX1,
+                  Adm_DX2 = dt1$DX2,
+                  dt1[, -1])
+
+dt1$Reason_for_Admission[dt1$DX1 == ""] <- dt1$diag1[dt1$DX1 == ""]
+dt1$Reason_for_Admission[dt1$Reason_for_Admission == "#N/A"] <- NA
+```
+
+### Fix Reason for Admission
+```{r}
+dt1$Reason_for_Admission[dt1$`Study Group` == "COVID" & 
+                           is.na(dt1$Reason_for_Admission)] <- "U07.1"
+
+dt1$Reason_for_Admission[dt1$Reason_for_Admission == "Pelvic Organ Prolapse/N81.9/N81.3"] <- "N81.9"
+dt1$Reason_for_Admission[dt1$Reason_for_Admission == "Altered Mental Status/R41.82"] <- "R41.82"
+dt1$Reason_for_Admission[dt1$Reason_for_Admission == "GI bleed/K92.2"] <- "K92.2"
+dt1$Reason_for_Admission[dt1$Reason_for_Admission == "Hyperglycemia/R73.9"] <- "R73.9"
+dt1$Reason_for_Admission[dt1$Reason_for_Admission == "RLQ Pain/R10. 31"] <- "R10.31"
+dt1$Reason_for_Admission[dt1$Reason_for_Admission == "Altered Mental Status/R41.82"] <- "R41.82"
+dt1$Reason_for_Admission[dt1$Reason_for_Admission == "N/A" ] <- NA
+```
+
+### DX2
+```{r}
+dt1$Adm_DX2[dt1$DX1 == ""] <- dt1$diag2[dt1$DX1 == ""]
+dt1$Adm_DX2[dt1$DX2 == "#N/A"] <- NA
+```
+
+### Save DX1
+```{r}
+diags <- dt1[, .(N = .N),
+             by = list(`Study Group`,
+                       Reason_for_Admission)]
+
+diags <- dcast.data.table(Reason_for_Admission ~ `Study Group`,
+                          value.var = "N",
+                          data = diags)
+
+# diags <- dt1[, .(N = .N),
+#              by = Reason_for_Admission]
+
+write.csv(diags,
+          file = "tmp/diags.csv",
+          row.names = FALSE)
+
+diags
+```
+
+## Reason for admission
+```{r}
+rfa <- fread("Data/diags_01142024.csv")
+
+rfa <- merge(dt1[, `Real ID`:`WHO-OSCI DISCHARGE`],
+             rfa,
+             by = "Reason_for_Admission",
+             all.x = TRUE)
+save(rfa,
+     file = "tmp/rfa.RData")
+```
+
+### Delete DX columns
+```{r}
+dt1$diag1 <- NULL
+dt1$diag2 <- NULL
+dt1$diag3 <- NULL
+dt1$diag4 <- NULL
+dt1$diag5 <- NULL
+dt1$diag6 <- NULL
+
+dt1 <- dt1[, `Real ID`:`TNF beta`]
+```
+
+### Format clinical variables
+```{r}
+dt1$`Real ID` <- as.character(dt1$`Real ID`)
+
+dt1$`Whole Blood` <- factor(dt1$`Whole Blood`,
+                            levels = unique(dt1$`Whole Blood`))
+
+dt1$Plasma <- factor(dt1$Plasma)
+
+dt1$`Study Group` <- factor(dt1$`Study Group`,
+                            levels = c("No COVID",
+                                       "COVID"))
+
+dt1$`Inpatient=1, ER=2, OP=3` <- factor(dt1$`Inpatient=1, ER=2, OP=3`,
+                                        levels = c("Inpatient",
+                                                   "ER",
+                                                   "OP"))
+
+dt1$`Admit Date` <- as.Date(as.character(dt1$`Admit Date`),
+                            "%m/%d/%Y")
+
+dt1$`Discharge Date` <- as.Date(as.character(dt1$`Discharge Date`),
+                                "%m/%d/%Y")
+
+dt1$Sex <- factor(dt1$Sex,
+                  levels = c("Male",
+                             "Female"))
+
+dt1$Race <- factor(dt1$Race,
+                   levels = c("White Non-Hispanic",
+                              "Black",
+                              "Asian",
+                              "Hispanic",
+                              "Other"))
+
+dt1$`If BMI ?30 Obesity Class (I,II,III)` <- factor(dt1$`If BMI ?30 Obesity Class (I,II,III)`,
+                                                    levels = c("I",
+                                                               "II",
+                                                               "III"))
+
+dt1$Vaccinated <- factor(dt1$Vaccinated,
+                         levels = c(0, 1),
+                         labels = c("No",
+                                    "Yes"))
+
+dt1$`Dose #1` <- factor(dt1$`Dose #1`,
+                        levels = c(0, 1),
+                        labels = c("No",
+                                   "Yes"))
+
+dt1$`Dose #2` <- factor(dt1$`Dose #2`,
+                        levels = c(0, 1),
+                        labels = c("No",
+                                   "Yes"))
+
+dt1$Booster <- factor(dt1$Booster,
+                      levels = c(0, 1, 9),
+                      labels = c("No",
+                                 "Yes",
+                                 "Unknown"))
+
+dt1$`Critical Care` <- factor(dt1$`Critical Care`,
+                              levels = c(0, 1),
+                              labels = c("No",
+                                         "Yes"))
+
+# `ICU LOS` = length of stay in the hospital
+dt1$Still_In_Hospital_08182023 <- is.na(as.numeric(dt1$`ICU LOS`))
+dt1$`ICU LOS` <- as.numeric(dt1$`ICU LOS`)
+
+# Death
+dt1$Expired <- factor(dt1$Expired,
+                      levels = c(0, 1),
+                              labels = c("No",
+                                         "Yes"))
+
+dt1$Wave <- factor(dt1$Wave,
+                   levels = c(1:4))
+
+# Luigi's keys
+dt1$`Smoking History (0,1,2)` <- factor(dt1$`Smoking History (0,1,2)`,
+                                        levels = c("Current",
+                                                   "Former",
+                                                   "Never"))
+
+# !!! GET LABELS!!!
+dt1$Age_Category <- factor(dt1$Age_Category,
+                           levels = 0:4)
+
+# Co-diagnoses/pre-existing conditions
+dt1$MI <- factor(dt1$MI)
+dt1$HF <- factor(dt1$HF)
+dt1$PVD <- factor(dt1$PVD)
+dt1$CVD <- factor(dt1$CVD)
+dt1$Dementia <- factor(dt1$Dementia)
+dt1$COPD <- factor(dt1$COPD)
+dt1$`Rheum/ CONNECTIVE TISSUE DISEASE` <- factor(dt1$`Rheum/ CONNECTIVE TISSUE DISEASE`)
+dt1$PUD <- factor(dt1$PUD)
+dt1$mliverd <- factor(dt1$mliverd)
+dt1$DiabNC <- factor(dt1$DiabNC)
+dt1$DiabC <- factor(dt1$DiabNC)
+dt1$AnyDM <- factor(dt1$AnyDM)
+dt1$Hemoplegia <- factor(dt1$Hemoplegia)
+dt1$RenalD <- factor(dt1$RenalD)
+dt1$Cancer <- factor(dt1$Cancer)
+dt1$msliver <- factor(dt1$msliver)
+dt1$MetaCancer <- factor(dt1$MetaCancer)
+dt1$AIDS <- factor(dt1$AIDS)
+dt1$HTN <- factor(dt1$HTN)
+dt1$Obese <- factor(dt1$Obese)
+
+# Medications
+dt1$tocilizumab <- factor(dt1$tocilizumab)
+dt1$remdesivir <- factor(dt1$remdesivir)
+dt1$dexamethasone <- factor(dt1$dexamethasone)
+dt1$methylprednisolone <- factor(dt1$methylprednisolone)
+dt1$prednisone <- factor(dt1$prednisone)
+dt1$hydrocortisone <- factor(dt1$hydrocortisone)
+dt1$azithromycin <- factor(dt1$azithromycin)
+dt1$hydroxychloroquine <- factor(dt1$hydroxychloroquine)
+dt1$regeneron <- factor(dt1$regeneron)
+dt1$ACEis <- factor(dt1$ACEis)
+dt1$ARBs <- factor(dt1$ARBs)
+dt1$ARNIs <- factor(dt1$ARNIs)
+dt1$Insulin <- factor(dt1$Insulin)
+dt1$Metformin <- factor(dt1$Metformin)
+dt1$Glimepiride <- factor(dt1$Glimepiride)
+dt1$Glipizide <- factor(dt1$Glipizide)
+dt1$Sitagliptin <- factor(dt1$Sitagliptin)
+dt1$`Full Dose Anticoagulation` <- factor(dt1$`Full Dose Anticoagulation`)
+dt1$`Prophylactic Anticoagulation` <- factor(dt1$`Prophylactic Anticoagulation`)
+
+# Lab work
+## NOTE: set correct values for LOQ/LOD! Converted to NAs for now
+dt1$HbA1c <- as.numeric(dt1$HbA1c)
+dt1$Vit_D_level <- as.numeric(dt1$Vit_D_level)
+dt1$ALT <- as.numeric(dt1$ALT)
+dt1$AST <- as.numeric(dt1$AST)
+dt1$`hs-CRP` <- as.numeric(dt1$`hs-CRP`)
+dt1$CRP <- as.numeric(dt1$CRP)
+dt1$Fibrinogen <- as.numeric(dt1$Fibrinogen)
+dt1$`D-Dimer` <- as.numeric(dt1$`D-Dimer`)
+dt1$ESR <- as.numeric(dt1$ESR)
+dt1$Ferritin <- as.numeric(dt1$Ferritin)
+dt1$LDH <- as.numeric(dt1$LDH)
+dt1$`Lactic Acid` <- as.numeric(dt1$`Lactic Acid`)
+dt1$PCT <- as.numeric(dt1$PCT)
+dt1$`Glucose Lvl` <- as.numeric(dt1$`Glucose Lvl`)
+dt1$Screat <- as.numeric(dt1$Screat)
+
+# Diagnoses
+dt1$Hyperlipidemia <- factor(dt1$Hyperlipidemia)
+dt1$`# Metabolic Syndrome Criteria` <- factor(dt1$`# Metabolic Syndrome Criteria`)
+
+# NA should be non-COVID patients - CHECK
+dt1$`WHO-OSCI D1` <- factor(dt1$`WHO-OSCI D1`,
+                            levels = 0:7)
+dt1$`WHO-OSCI D3` <- factor(dt1$`WHO-OSCI D3`,
+                            levels = 0:7)
+dt1$`WHO-OSCI D7` <- factor(dt1$`WHO-OSCI D7`,
+                            levels = 0:7)
+dt1$`WHO-OSCI D14` <- factor(dt1$`WHO-OSCI D14`,
+                             levels = 0:7)
+dt1$`WHO-OSCI D21` <- factor(dt1$`WHO-OSCI D21`,
+                             levels = 0:7)
+dt1$`WHO-OSCI D28` <- factor(dt1$`WHO-OSCI D28`,
+                             levels = 0:7)
+
+dt1$`WHO-OSCI DISCHARGE` <- factor(dt1$`WHO-OSCI DISCHARGE`)
+
+# ELISA: all numeric
+```
+
+### Summary clinical and ELISA
+```{r}
+summary(dt1)
+```
+
+## Gene expressions
+NOTE: data contains both, coding and non-coding genes.  
+  
+### First RNA-seq file
+```{r}
+dt2 <- fread("Data/gene_count.xls")
+
+rnaseq_meta1 <- data.table(sample_names = colnames(dt2)[2:58],
+                           rnaseq_cohort = sapply(strsplit(x = colnames(dt2)[2:58], 
+                                                           split = "_"), 
+                                                  function(x) x[1]),
+                           `Real ID` = sapply(strsplit(x = colnames(dt2)[2:58], 
+                                                       split = "_"), 
+                                              function(x) x[2]))
+rnaseq_meta1
+```
+
+### Second RNA-seq file
+```{r}
+dt3 <- fread("Data/gene_count_Additional.txt")
+
+rnaseq_meta2 <- data.table(sample_names = names(dt3)[2:46],
+                           rnaseq_cohort = "",
+                           `Real ID` = gsub(pattern = "LB", 
+                                            x = names(dt3)[2:46],
+                                            replacement = ""))
+rnaseq_meta2
+```
+
+### Merge RNA-seq meta files
+```{r}
+rnaseq_meta <- rbindlist(list(rnaseq_meta1,
+                              rnaseq_meta2))
+length(unique(rnaseq_meta$`Real ID`))
+# Same as number of rows, hence, all unique sample IDs
+
+rnaseq_meta$rnaseq_cohort <- NULL
+```
+
+### Merge RNA-seq files
+First 10 columns are gene info, the other 102 columns are the samples.
+```{r}
+dt_rna <- merge(dt2,
+                dt3,
+                by = c("gene_name",
+                       "gene_id",
+                       "gene_chr",
+                       "gene_start",
+                       "gene_end",
+                       "gene_strand",
+                       "gene_length",
+                       "gene_biotype",
+                       "gene_description",
+                       "tf_family"))
+```
+
+## Duplicated gene names
+```{r}
+dup <- dt_rna[gene_name %in% gene_name[duplicated(gene_name) == TRUE], ]
+tbl1 <- data.table(table(dup$gene_name))
+setorder(tbl1,
+         -N)
+head(tbl1)
+
+# NOTE: RFxxxxx genes are misc_RNAs and have many variants.
+#       E.g., "RF00019" was recorded on 758 rows (why?)
+head(dt_rna[gene_name == "RF00019", ])
+
+dup_genes <- unique(dup$gene_name)
+
+# 175 gene names are repeated more than once
+length(dup_genes)
+dup_genes[1:10]
+```
+
+### Add counts for the same genes
+```{r}
+out <- list()
+for (i in 1:length(dup_genes)) {
+  out[[i]] <- dup[gene_name == dup_genes[i], ]
+  
+  for (j in 11:ncol(dup)) {
+    out[[i]][, j] <- sum(out[[i]][, j, with = FALSE])
+  }
+  out[[i]] <- out[[i]][gene_length == max(gene_length), ][1, ]
+}
+out <- do.call("rbind",
+               out)
+
+out
+```
+
+### Delete duplicates and replace them with aggregated counts for those genes
+```{r}
+dt_rna <- dt_rna[!(gene_name %in% dup_genes), ]
+
+dt_rna <- rbindlist(list(dt_rna,
+                         out))
+
+length(unique(dt_rna$gene_name))
+nrow(dt_rna)
+```
+
+### IDs that are in RNA-seq but not in Clinical
+11 IDs  
+```{r}
+id_no_clin <- rnaseq_meta$`Real ID`[!(rnaseq_meta$`Real ID` %in% dt1$`Real ID`)]
+id_no_clin
+```
+
+### Patient "7215440" has 2 RNA-seq samples. We will use the 2nd one "7215440b" and discard the 1st one "7215440a"
+```{r}
+dt1[`Real ID` %in% c("7215440",
+                     "7215440a",
+                     "7215440b")]
+
+rnaseq_meta$`Real ID`[rnaseq_meta$`Real ID` == "7215440b"] <- "7215440"
+rnaseq_meta$`Real ID`[!(rnaseq_meta$`Real ID` %in% dt1$`Real ID`)]
+```
+
+### IDs that are in Clinical but not in RNA-seq
+91 IDs  
+```{r}
+id_no_rna <- dt1$`Real ID`[!(dt1$`Real ID` %in% rnaseq_meta$`Real ID`)]
+id_no_rna 
+```
+
+### Add Entrez ID
+Source: https://github.com/KongLabRUSP/mes13/blob/731b35f3de3ffde4e42d5045fb5fcdf3dfc97d72/mes13_fx_report_v1.Rmd#L589  
+
+see also: https://stackoverflow.com/questions/71131883/r-how-do-i-convert-gene-symbols-to-entrez-ids  
+  
+NOTE: ReactomPA tutorial recommend using clusterProfiler::bitr() for Entraz ID mapping (Section 9.1 of https://yulab-smu.top/biomedical-knowledge-mining-book/reactomepa.html). But we used AnnotationDbi::mapIds function, with "org.Hs.eg.db" database - a genome wide annotation of Human.
+  
+```{r}
+entrez_id <- AnnotationDbi::mapIds(org.Hs.eg.db,
+                                   keys = dt_rna$gene_name,
+                                   column = "ENTREZID",
+                                   keytype = "SYMBOL")
+entrez_id <- data.table(gene_name = names(entrez_id),
+                        entrez_id = entrez_id)
+head(entrez_id)
+```
+
+#### Merge Entrez IDs with RNA-seq data
+```{r}
+dt_rna <- merge(entrez_id,
+                dt_rna,
+                by = "gene_name",
+                all.y = TRUE)
+```
+
+#### Genes missing Entrez ID
+```{r}
+tmp <- dt_rna[is.na(entrez_id), 
+              c("gene_name",
+                "entrez_id",
+                "gene_biotype")]
+
+dt_rna[, .(No_ENtraz_ID = .N[is.na(entrez_id)],
+           N = .N),
+       by = gene_biotype]
+
+tbl2 <- data.table(table(tmp$gene_biotype))
+tbl2.2 <- data.table(table(dt_rna$gene_biotype))
+tbl2 <- merge(tbl2,
+              tbl2.2,
+              by = "V1",
+              all = TRUE)
+colnames(tbl2) <- c("gene_biotype",
+                    "no_entranz_id",
+                    "N_genes")
+setorder(tbl2,
+         -N_genes)
+tbl2[, pct_missing_entranz_id := round(100*no_entranz_id/N_genes, 2)]
+
+rm(tbl2.2)
+
+
+tbl2
+```
+
+### lncRNA database from John Johnson (NOT USED YET)
+```{r}
+# dt_lnc_john <- fread("Data/lncipedia_transcript_type.lncRNA")
+```
+
+## Save data
+```{r}
+save(dt1,
+     file = "Data/dt1.RData")
+
+save(dt_rna,
+     file = "Data/dt_rna.RData")
+
+save(rnaseq_meta,
+     file = "Data/rnaseq_meta.RData")
+```
+
+## Clean
+```{r}
+rm(list = ls())
+gc()
+```
+
+# Session
+```{r}
+sessionInfo()
+```

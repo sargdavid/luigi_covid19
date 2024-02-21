@@ -32,10 +32,14 @@ require(org.Hs.eg.db)
 
 require(tidyverse)
 require(tidytlg)
-# require(gt)
-# require(rtables)
 require(gridExtra)
 require(nnet)
+
+# Not Used:
+# BiocManager::install("clusterProfiler")
+# require(clusterProfiler)
+# require(gt)
+# require(rtables)
 ```
 
 Javier, 9/15/2023:  
@@ -489,6 +493,53 @@ dt_rna <- merge(dt2,
                        "gene_biotype",
                        "gene_description",
                        "tf_family"))
+```
+
+## Duplicated gene names
+```{r}
+dup <- dt_rna[gene_name %in% gene_name[duplicated(gene_name) == TRUE], ]
+tbl1 <- data.table(table(dup$gene_name))
+setorder(tbl1,
+         -N)
+head(tbl1)
+
+# NOTE: RFxxxxx genes are misc_RNAs and have many variants.
+#       E.g., "RF00019" was recorded on 758 rows (why?)
+head(dt_rna[gene_name == "RF00019", ])
+
+dup_genes <- unique(dup$gene_name)
+
+# 175 gene names are repeated more than once
+length(dup_genes)
+dup_genes[1:10]
+```
+
+### Add counts for the same genes
+```{r}
+out <- list()
+for (i in 1:length(dup_genes)) {
+  out[[i]] <- dup[gene_name == dup_genes[i], ]
+  
+  for (j in 11:ncol(dup)) {
+    out[[i]][, j] <- sum(out[[i]][, j, with = FALSE])
+  }
+  out[[i]] <- out[[i]][gene_length == max(gene_length), ][1, ]
+}
+out <- do.call("rbind",
+               out)
+
+out
+```
+
+### Delete duplicates and replace them with aggregated counts for those genes
+```{r}
+dt_rna <- dt_rna[!(gene_name %in% dup_genes), ]
+
+dt_rna <- rbindlist(list(dt_rna,
+                         out))
+
+length(unique(dt_rna$gene_name))
+nrow(dt_rna)
 ```
 
 ### IDs that are in RNA-seq but not in Clinical
@@ -1002,7 +1053,7 @@ dt1$LOS[dt1$`Real ID` == 771982]
 
 
 
-# ELISA
+## ELISA
 ```{r}
 dt_elisa <- data.table(dt1[, c("Real ID",
                                "Study Group",
@@ -1018,7 +1069,7 @@ addmargins(table(COVID = dt_elisa$`Study Group`,
       AnyDM = dt_elisa$AnyDM))
 ```
 
-## Plot protein concentrations
+### Plot protein concentrations
 ```{r}
 for (i in 4:ncol(dt_elisa)) {
   hist(dt_elisa[,
@@ -1029,7 +1080,7 @@ for (i in 4:ncol(dt_elisa)) {
 }
 ```
 
-## Plot log10 protein concentrations
+### Plot log10 protein concentrations
 ```{r}
 for (i in 3:ncol(dt_elisa)) {
   hist(log10(dt_elisa[, 
@@ -1040,7 +1091,7 @@ for (i in 3:ncol(dt_elisa)) {
 }
 ```
 
-## Boxplots of log10 concentrations
+### Boxplots of log10 concentrations
 ```{r}
 out <- list()
 for (i in 4:ncol(dt_elisa)) {
@@ -1081,15 +1132,15 @@ for (i in 4:ncol(dt_elisa)) {
 }
 ```
 
-## LM results
+### LM results
 ```{r}
 res <- rbindlist(out)
 # res$pval[res$pval == 0] <- "<0.001"
 res
 ```
 
-## ELISA PCA
-### PCA
+### ELISA PCA
+#### PCA
 ```{r}
 m1 <- prcomp(dt_elisa[, -c(1:3)],
              center = TRUE,
@@ -1097,7 +1148,7 @@ m1 <- prcomp(dt_elisa[, -c(1:3)],
 summary(m1)
 ```
 
-### Scores (i.e. points)
+#### Scores (i.e. points)
 ```{r}
 dt_scr <- data.table(m1$x[, 1:2])
 dt_scr$covid <- dt_elisa$`Study Group`
@@ -1108,7 +1159,7 @@ dt_scr$dm <- factor(dt_elisa$AnyDM,
 head(dt_scr)
 ```
 
-### Loading (i.e. arrows)
+#### Loading (i.e. arrows)
 ```{r}
 dt_rot <- as.data.frame(m1$rotation[, 1:2])
 dt_rot$feat <- rownames(dt_rot)
@@ -1116,7 +1167,7 @@ dt_rot <- data.table(dt_rot)
 dt_rot
 ```
 
-### Axis labels
+#### Axis labels
 ```{r}
 u.axis.labs <- paste(colnames(dt_rot)[1:2], 
                      sprintf('(%0.1f%% explained var.)', 
@@ -1124,7 +1175,7 @@ u.axis.labs <- paste(colnames(dt_rot)[1:2],
 u.axis.labs
 ```
 
-### Biplot by COVID
+#### Biplot by COVID
 ```{r,fig.width=8,fig.height=8}
 grp <- dt_scr$covid
 scl <- 30
@@ -1168,7 +1219,7 @@ p1
 # graphics.off()
 ```
 
-### Biplot by COVID
+#### Biplot by COVID
 ```{r,fig.width=8,fig.height=8}
 grp <- dt_scr$dm
 scl <- 30
@@ -1212,10 +1263,10 @@ p1
 # graphics.off()
 ```
 
-# RNA-seq
+## RNA-seq
 https://bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html  
 
-## Merge RNA-seq meta-data with clinical
+### Merge RNA-seq meta-data with clinical
 ```{r}
 rnaseq_meta_clin <- merge(rnaseq_meta,
                           dt1[, c("Real ID",
@@ -1228,56 +1279,46 @@ rnaseq_meta_clin <- merge(rnaseq_meta,
                                   "BMI",
                                   "AnyDM")],
                           by = "Real ID")
+
+names(rnaseq_meta_clin)[3] <- "Cohort"
+rnaseq_meta_clin$Cohort <- gsub(x = rnaseq_meta_clin$Cohort,
+                                pattern = " ",
+                                replacement = "_")
+rnaseq_meta_clin$Cohort <- factor(rnaseq_meta_clin$Cohort,
+                                  levels = c("No_COVID",
+                                             "COVID"))
 ```
 
-## Duplicated gene names
-```{r}
-dups <- dt_rna[gene_name %in% gene_name[duplicated(gene_name) == TRUE], ]
-```
-
-## Gene types
+### Gene types
 ```{r}
 addmargins(table(dt_rna$gene_biotype))
 ```
 
-## Protein coding genes only
+### Sequencing depth
 ```{r}
-dt_rna_cod <- dt_rna[gene_biotype == "protein_coding",]
+seq_d <- colSums(dt_rna[, -c(1:10)])
+hist(seq_d, 20)
 ```
 
-### Duplicated coding genes
+### Fragments Per Million (FPM)
+#### DESeq: all genes
 ```{r}
-dup_cod <- dt_rna_cod[gene_name %in% gene_name[duplicated(gene_name) == TRUE], ]
-dup_cod_genes <- unique(dup_cod$gene_name)
-dup_cod_genes
+ndx <- which(colnames(dt_rna) %in% rnaseq_meta_clin$sample_names)
+
+tmp <- as.matrix(dt_rna[, ndx, with = FALSE])
+rownames(tmp) <- dt_rna$gene_id
+
+dds_all <- DESeqDataSetFromMatrix(countData = tmp, 
+                                  colData = rnaseq_meta_clin,
+                                  design = ~ 1)
+dds_all
 ```
 
-### Add counts for the same genes
+#### FPM
 ```{r}
-out <- list()
-for (i in 1:length(dup_cod_genes)) {
-  out[[i]] <- dup_cod[gene_name == dup_cod_genes[i], ]
-  
-  for (j in 11:ncol(dup_cod)) {
-    out[[i]][, j] <- sum(out[[i]][, j, with = FALSE])
-  }
-  out[[i]] <- out[[i]][gene_length == max(gene_length), ][1, ]
-}
-out <- do.call("rbind",
-               out)
-
-out
-```
-
-### Delete duplicates and replace them with aggregated counts for those genes
-```{r}
-dt_rna_cod <- dt_rna_cod[!(gene_name %in% dup_cod_genes), ]
-
-dt_rna_cod <- rbindlist(list(dt_rna_cod,
-                             out))
-
-length(unique(dt_rna_cod$gene_name))
-nrow(dt_rna_cod)
+dt_fpm <- fpm(object = dds_all,
+              robust = FALSE)
+colSums(dt_fpm)[1:5]
 ```
 
 ### Add Entrez ID
@@ -1285,22 +1326,42 @@ Source: https://github.com/KongLabRUSP/mes13/blob/731b35f3de3ffde4e42d5045fb5fcd
 
 see also: https://stackoverflow.com/questions/71131883/r-how-do-i-convert-gene-symbols-to-entrez-ids  
   
+NOTE: ReactomPA tutorial recommend using clusterProfiler::bitr() for Entraz ID mapping (Section 9.1 of https://yulab-smu.top/biomedical-knowledge-mining-book/reactomepa.html). But we used AnnotationDbi::mapIds function, with "org.Hs.eg.db" database - a genome wide annotation of Human.
+  
 ```{r}
-# entraz_id <- list()
-# for (i in 1:length(gene_names)) {
-#   out <- try(unlist(mget(x = gene_names[i],
-#                          envir = org.Mm.egALIAS2EG)),
-#              silent = TRUE)
-#   if (class(out)[1] != "try-error") {
-#     # entraz_id[[i]] <- out
-#     entraz_id[[i]] <- data.table(gene = gene_names[i],
-#                                  version = names(out),
-#                                  entraz_id = out)
-#   } 
-#   # else {
-#   #   entraz_id[[i]] <- NA
-#   # }
-# }
+entrez_id <- AnnotationDbi::mapIds(org.Hs.eg.db,
+                                   keys = dt_rna$gene_name,
+                                   column = "ENTREZID",
+                                   keytype = "SYMBOL")
+entrez_id <- data.table(gene_name = names(entrez_id),
+                        entrez_id = entrez_id)
+head(entrez_id)
+```
+
+### Merge Entrez IDs with RNA-seq data
+```{r}
+dt_rna <- merge(entrez_id,
+                dt_rna,
+                by = "gene_name",
+                all.y = TRUE)
+```
+
+
+#### Genes missing Entrez ID
+```{r}
+tmp <- dt_rna[is.na(entrez_id), 
+              c("gene_name",
+                "entrez_id",
+                "gene_biotype")]
+tbl2 <- data.table(table(tmp$gene_biotype))
+setorder(tbl2,
+         -N)
+tbl2
+```
+
+### Protein coding genes only
+```{r}
+dt_rna_cod <- dt_rna[gene_biotype == "protein_coding",]
 ```
 
 ### Prepare DESeq object
@@ -1324,13 +1385,6 @@ rownames(tmp) <- dt_rna_cod$gene_id
 dds_cod <- DESeqDataSetFromMatrix(countData = tmp, 
                                   colData = rnaseq_meta_clin,
                                   ~ Cohort)
-```
-
-### Fragments Per Million (FPM)
-```{r}
-dt_fpm <- fpm(object = dds_cod,
-              robust = FALSE)
-colSums(dt_fpm)[1:5]
 ```
 
 #### Filter out genes with small number of hits
