@@ -3,22 +3,31 @@ title: "Luigi's COVID-19 Analyses"
 output: html_notebook
 ---
 
-Created: 9/6/2023  
+Created: 9/6/2023\
 Last update: 02/20/2024
 
-Analysis datasets and copy of the Rmd are in Rutgers box:  
-https://rutgers.app.box.com/folder/227391194192  
+Analysis datasets and copy of the Rmd are in Rutgers box:\
+<https://rutgers.app.box.com/folder/227391194192>
 
-GitHub Repo:  
-https://github.com/sargdavid/luigi_covid19  
+GitHub Repo:\
+<https://github.com/sargdavid/luigi_covid19>
 
 # Setup
+
 ```{r setup}
 options(scipen = 999)
 
+# install.packages("zlibbioc_1.48.0.tar.gz",
+#                  repos = NULL,
+#                  type = "source")
+
 # if (!require("BiocManager",
 #              quietly = TRUE))
-#   install.packages("BiocManager")
+# BiocManager::install("MOFA2")
+
+# if (!require("BiocManager",
+#              quietly = TRUE))
+# install.packages("BiocManager")
 # BiocManager::install("ReactomePA")
 # BiocManager::install("org.Hs.eg.db")
 
@@ -28,6 +37,9 @@ require(table1)
 require(DESeq2)
 require(ReactomePA)
 require(org.Hs.eg.db)
+# require(zlibbioc)
+# require(MOFA2)
+require(psych)
 
 require(tidyverse)
 require(tidytlg)
@@ -35,30 +47,67 @@ require(gridExtra)
 require(nnet)
 
 # Not Used:
+# require(NBZIMM)::lme.zig(fixed = logTPM ~ ibd_infl,
+#                          random = ~ 1| Batch,
+#                          zi_fixed = ~ ibd_infl,
+#                          data = dt,
+#                          verbose = FALSE)
 # BiocManager::install("clusterProfiler")
 # require(clusterProfiler)
 # require(gt)
 # require(rtables)
 ```
 
-Javier, 9/15/2023:  
-1. Build survival model using LOS as dates. Assuming all death are in-hospital, end of LOS.  
+**Meeting 3/14/2024:**  
+1. Lu: cytokine storm can more likely happen to the ICU/sever patients. Therefore, stratify by severity etc.  
+2.	My ELISA set is still missing ACE2 and DPP4. I need to check the data to see why these columns got deleted.  
+3.	The 21 proteins included in the attached were measured in pg/mL but the missing ones in ug/mL  
+4.	Twopartm::AME did not converge with the bootstrap option for the 95%CI. Therefore, I used the delta method. Need to check the convergence issue tomorrow with Javier and Yajie.  
 
-Meeting 9/19/23:  
-1. Was everybody admitted with COVID-19 symptoms? In Marshall's email from 11/14/23 8:01AM he said "not sure [admission DX] will be necessary since admitting DX will be COVID". Does this mean that controls where also admitted with COVID diagnoses? How?  
-2. Do survival for in-patients only using LOS.  
-3. Look at LOS of dead patients.  
-4. Do DM patients have higher WHO OSCI score at admission?  
-5. COVID+DM = more likely to go to ICU vs COVID+noDM?
-6. Outcomes: death, LOS, ventilation, ICU.  
+*ToDos:*  
+1.	Transform the data using quantile or Fisher-Yates normalization (DNAMR::cnormalize), and perform factor analysis (psych::fa instead of factanal)  
+2.	Apply tow-part model to normalized gene expressions.  
+3.	Reactom Pathway Analysis (ReactomPA) repeated on these sets of genes  
+4.	Factor analysis of gene expressions. Compare the factors with Gene Ontology, Reactom Pathways, KEGG pathways etc. Include Module Analysis (see WGCNA: Weighted Correlation Network Analysis by Steve Horvath. We used it in lncRNA paper. Can be more applicable for Paper 2 on lncRNAs.)  
 
-Meeting 9/7/23:  
-1. Look at inflammation signature w/wo DM, stratified by COVID.  
-2. in COVID, coagulation cascade pathway was affected. See if we can find it in clin. data, ELIZA or RNA-seq. SHould coagulation be considered in COVID pateints' treatment?  
-3. Coding/non-coding gene co-expression.  
-4. Activation of inflammatory pathways because we have transcriptome, not just genome.  
-5. Neanderthals' genes (see Lu's email).  
-6. Important factors: Critical care, WHO OSCI, LOS, ACE inhibitors, age>55, HTN, DM.  
+**Feedbakc from stats AI meeting 3/8/2024:**  
+1. Use MOFA (Bernard)  
+2. Check Diabolo and COMBI packages  
+3. Causal representative learning and causal graphs/networks for coding/non-coding RNA interactions (Mingshi)  
+4. Color modules (Caesar, Stefan & John)  
+5. Factor analysis  
+6. Gene ontology to connect factors to GOs (Javier) 
+7. Ask Lu if I can share Table 1 with Michael Katehakis  
+
+**Meeting 2/1/2024:**   
+1. RNA vs. ELISA - need to know coding genes  
+2. Neanderthal genes  
+3. List of genes from Lu  
+4. IFI27: what cyto/ cemokine is associated with it (from ELISA panel)? Cytokines should regulate IFI27  
+5. BAMBI vs ACE2 (new ELISA)  
+6. Find specific proteins (ELISA) that result in the expression of another gene  
+7. Pathway analysis with ReactomPA (DONE)  
+8. Focus on DM  
+9. Factor analysis  
+10. Anti-IL6 was used in pandemic. Look at INFg, IL1, IL6 and TNFa  
+  
+**Javier, 9/15/2023:**  
+1. Build survival model using LOS as dates. Assuming all death are in-hospital, end of LOS.
+
+**Meeting 9/19/23:**  
+1. Was everybody admitted with COVID-19 symptoms? In Marshall's email from 11/14/23 8:01AM he said "not sure [admission DX] will be necessary since admitting DX will be COVID". Does this mean that controls where also admitted with COVID diagnoses? How?\
+2. Do survival for in-patients only using LOS.\
+3. Look at LOS of dead patients.\
+4. Do DM patients have higher WHO OSCI score at admission?\
+5. COVID+DM = more likely to go to ICU vs COVID+noDM? 6. Outcomes: death, LOS, ventilation, ICU.
+
+**Meeting 9/7/23:**  
+1. Look at inflammation signature w/wo DM, stratified by COVID.\
+2. in COVID, coagulation cascade pathway was affected. See if we can find it in clin. data, ELIZA or RNA-seq. Should coagulation be considered in COVID patients' treatment?\
+3. Coding/non-coding gene co-expression.\
+4. Activation of inflammatory pathways because we have transcriptome, not just genome.\
+5. Neanderthals' genes (see Lu's email).\
+6. Important factors: Critical care, WHO OSCI, LOS, ACE inhibitors, age\>55, HTN, DM.
 
 ```{r}
 # rows_empty <- function(mat) {
@@ -126,13 +175,14 @@ Meeting 9/7/23:
 ```
 
 # Load data
-NOTE: these datasets were created from source in 'luigi_covid19_data_preprocessing_02202024.Rmd'  
-  
+
+NOTE: these datasets were created from source in 'luigi_covid19_data_preprocessing_02202024.Rmd'
+
 ```{r}
-load("Data/dt1.RData")
-load("Data/dt_rna.RData")
-load("Data/rnaseq_meta.RData")
-load("Data/rfa.RData")
+load("../Data/dt1.RData")
+load("../Data/dt_rna.RData")
+load("../Data/rnaseq_meta.RData")
+load("../Data/rfa.RData")
 ```
 
 # Clinical Data
@@ -150,7 +200,7 @@ t1
 
 ```{r}
 write.table (t1 , 
-             file = "tmp/table1.csv",
+             file = "../tmp/table1.csv",
              col.names = TRUE, 
              row.names = FALSE,
              # append = TRUE,
@@ -263,7 +313,7 @@ out1 <- data.table(Response = "Dead",
 out1
 ```
 
-### Death vs DM,  COVID only 
+### Death vs DM, COVID only
 ```{r}
 covid <- droplevels(dt1[`Study Group` == "COVID", ])
 
@@ -276,7 +326,7 @@ addmargins(table(Death = covid$Expired,
 nocovid <- droplevels(dt1[`Study Group` != "COVID", ])
 ```
 
-### Death vs Obese, COVID only 
+### Death vs Obese, COVID only
 ```{r}
 chisq.test(covid$Expired,
            covid$Obese)
@@ -285,7 +335,8 @@ addmargins(table(Death = covid$Expired,
                  Obese = covid$Obese))
 ```
 
-### Death vs BMI, COVID only 
+### Death vs BMI, COVID only
+
 ```{r}
 t.test(covid$BMI ~ covid$Expired)
 
@@ -302,7 +353,9 @@ ggplot(covid,
 ```
 
 ### Death vs Critical Care
+
 Significant
+
 ```{r}
 addmargins(table(Death = covid$Expired,
                  CrCare = covid$`Critical Care`))
@@ -353,9 +406,10 @@ out31 <- data.table(Response = "Dead",
 out31
 ```
 
-### Death vs. COVID | Diabetes
-No significant difference.  
-Model with interaction is worse.  
+### Death vs. COVID \| Diabetes
+
+No significant difference.\
+Model with interaction is worse.
 
 ```{r}
 m2 <- glm(Expired ~ `Study Group` +
@@ -383,7 +437,9 @@ out2
 ```
 
 ### Death vs COVID, adjusted for critical care
-Both significant in additive model.  
+
+Both significant in additive model.
+
 ```{r}
 m4 <- glm(Expired ~ `Study Group` + `Critical Care`,
           family = binomial,
@@ -411,6 +467,7 @@ out4
 ```
 
 No significance in interaction model.
+
 ```{r}
 m41 <- glm(Expired ~ `Study Group`*`Critical Care`,
            family = binomial,
@@ -418,9 +475,10 @@ m41 <- glm(Expired ~ `Study Group`*`Critical Care`,
 summary(m41)
 ```
 
-
 ### Death vs COVID, adjusted for DM
+
 No significance
+
 ```{r}
 m5 <- glm(Expired ~ `Study Group` +
             AnyDM,
@@ -429,7 +487,8 @@ m5 <- glm(Expired ~ `Study Group` +
 summary(m5)
 ```
 
-### Death vs COVID, adjusted 
+### Death vs COVID, adjusted
+
 ```{r}
 m6 <- glm(Expired ~ `Study Group` +
             AnyDM +
@@ -443,13 +502,16 @@ summary(m6)
 ```
 
 ### New variable: DM+Obesity
+
 ```{r}
 chisq.test(dt1$AnyDM,
            dt1$Obese)
 ```
 
 ## ICU
+
 ### ICU LOS
+
 ```{r}
 summary(dt1$`ICU LOS`)
 hist(dt1$`ICU LOS`, 200)
@@ -467,6 +529,7 @@ summary(m7)
 ```
 
 ### Critical care
+
 ```{r}
 m8 <- glm(`Critical Care` ~ AnyDM +
             Age +
@@ -479,13 +542,15 @@ summary(m8)
 ```
 
 ## WHO-OSCI
+
 ### Desease severity at baseline by WHO-OSCI
-if <5 = mild  
-if >= 5 = severe  
-5 = very sick  
-6 = intubated  
-7 = ventilated  
-if 8: dead   
+
+if \<5 = mild\
+if \>= 5 = severe\
+5 = very sick\
+6 = intubated\
+7 = ventilated\
+if 8: dead
 
 ```{r}
 covid$who_osci_d1_cat <- "Dead"
@@ -504,6 +569,7 @@ addmargins(table("WHO-OSCI D1" = dt1$`WHO-OSCI D1`,
 ```
 
 ### WHO-OSCI over time
+
 ```{r}
 tmp <- dt1[, c("Real ID",
                "Study Group",
@@ -544,6 +610,7 @@ table(dt1$`WHO-OSCI D1`,
 ```
 
 ### Table 2
+
 ```{r}
 t2 <- dcast.data.table(`Real ID` ~ Day,
                        value.var = "WHO_OSCI",
@@ -584,7 +651,6 @@ dt1[LOS > 1,
            "Study Group")]
 ```
 
-
 ```{r}
 dt1$LOS[dt1$`Real ID` == 771982]
 ```
@@ -596,77 +662,374 @@ dt_elisa <- data.table(dt1[, c("Real ID",
                                "AnyDM")],
                        dt1[, `G-CSF (CSF-3)`:`TNF beta`])
 
-summary(dt_elisa)
-
 # Remove patients with no ELISA data
 dt_elisa <- dt_elisa[!is.na(`G-CSF (CSF-3)`), ]
 
 addmargins(table(COVID = dt_elisa$`Study Group`,
       AnyDM = dt_elisa$AnyDM))
+
+summary(dt_elisa)
 ```
 
-## Plot protein concentrations
+## ELISA long format
 ```{r}
-for (i in 4:ncol(dt_elisa)) {
-  hist(dt_elisa[,
-                c(i),
-                with = FALSE][[1]],
-       20,
-       main = colnames(dt_elisa)[i])
-}
+dt_elisa_l <- melt.data.table(data = dt_elisa,
+                              id.vars = 1:3,
+                              measure.vars = 4:ncol(dt_elisa),
+                              variable.name = "Protein",
+                              value.name = "Concentration[pg/mL]")
+
+dt_elisa_l[, grp := factor(paste(`Study Group`,
+                                 AnyDM,
+                                 sep = "_"),
+                           levels = c("No COVID_0",
+                                      "COVID_0",
+                                      "No COVID_1",
+                                      "COVID_1"),
+                           labels = c("No COVID/No DM",
+                                      "COVID/No DM",
+                                      "No COVID/DM",
+                                      "COVID/DM"))]
+
+dt_elisa_l$Log10Conc <- log10(dt_elisa_l$`Concentration[pg/mL]` + 1)
 ```
 
-## Plot log10 protein concentrations
+### Histograms
+```{r,fig.height=10,fig.width=10}
+ggplot(dt_elisa_l,
+       aes(x = `Concentration[pg/mL]`)) +
+  facet_wrap(~ Protein,
+             scale = "free") +
+  geom_histogram(bins = 30) +
+  theme_bw()
+```
+
+### Boxplot
+```{r,fig.height=10,fig.width=10}
+ggplot(dt_elisa_l,
+       aes(x = grp,
+           y = `Concentration[pg/mL]`)) +
+  facet_wrap(~ Protein,
+             scale = "free_y") +
+  geom_boxplot(outlier.shape = "") +
+  geom_point(aes(fill = grp,
+                 group = `Real ID`,),
+             shape = 21,
+             size = 3,
+             alpha = 0.7,
+             position = position_dodge(0.3)) +
+  theme_bw() +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 45,
+                                   hjust = 1))
+```
+
+
+## Log10 protein concentrations
+### Histogram
+```{r,fig.height=10,fig.width=10}
+ggplot(dt_elisa_l,
+       aes(x = Log10Conc)) +
+  facet_wrap(~ Protein,
+             scale = "free") +
+  geom_histogram(bins = 30) +
+  theme_bw()
+```
+
+### Boxplots
+```{r,fig.height=10,fig.width=10}
+ggplot(dt_elisa_l,
+       aes(x = grp,
+           y = Log10Conc)) +
+  facet_wrap(~ Protein,
+             scale = "free_y") +
+  geom_boxplot(outlier.shape = "") +
+  geom_point(aes(fill = grp,
+                 group = `Real ID`,),
+             shape = 21,
+             size = 3,
+             alpha = 0.7,
+             position = position_dodge(0.3)) +
+  scale_x_discrete("") +
+  scale_y_discrete("Log10(Concentration[pg/mL] + 1)") +
+  theme_bw() +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 60,
+                                   hjust = 1))
+```
+
 ```{r}
-for (i in 3:ncol(dt_elisa)) {
-  hist(log10(dt_elisa[, 
-                c(i),
-                with = FALSE][[1]] + 1),
-       20,
-       main = colnames(dt_elisa)[i])
-}
+# out <- list()
+# for (i in 4:ncol(dt_elisa)) {
+#   
+#   tmp <- data.table(id = dt_elisa$`Real ID`,
+#                     covid = dt_elisa$`Study Group`,
+#                     dm = factor(dt_elisa$AnyDM,
+#                                 levels = 0:1,
+#                                 labels = c("No DM",
+#                                            "DM")),
+#                     resp = log10(dt_elisa[, c(i), with = FALSE][[1]] + 0.01))
+# 
+#   p1 <- ggplot(tmp,
+#                aes(x = covid,
+#                    y = resp)) +
+#     facet_wrap(~ dm) +
+#     geom_boxplot(outlier.shape = "") +
+#     geom_point(aes(fill = covid,
+#                    group = id,),
+#                shape = 21,
+#                size = 3,
+#                alpha = 0.7,
+#                position = position_dodge(0.3)) +
+#     ggtitle(colnames(dt_elisa)[i]) +
+#     theme_bw()
+#   print(p1)
+#   
+#   s1 <- summary(lm(resp ~ covid*dm,
+#                    data = tmp))
+#   
+#   out[[i- 3]] <- data.table(protein = colnames(dt_elisa)[i],
+#                             comparison = c("COVID - non-COVID",
+#                                            "DM - non-DM",
+#                                            "COVID*DM Interaction"),
+#                             diff = round(s1$coefficients[-1, 1], 3),
+#                             se_diff = round(s1$coefficients[-1, 2], 3),
+#                             pval = round(s1$coefficients[-1, 4], 3))
+# }
 ```
 
-## Boxplots of log10 concentrations
+## ELISA Two Part model
 ```{r}
-out <- list()
-for (i in 4:ncol(dt_elisa)) {
-  
-  tmp <- data.table(id = dt_elisa$`Real ID`,
-                    covid = dt_elisa$`Study Group`,
-                    dm = factor(dt_elisa$AnyDM,
-                                levels = 0:1,
-                                labels = c("No DM",
-                                           "DM")),
-                    resp = log10(dt_elisa[, c(i), with = FALSE][[1]] + 0.01))
-
-  p1 <- ggplot(tmp,
-               aes(x = covid,
-                   y = resp)) +
-    facet_wrap(~ dm) +
-    geom_boxplot(outlier.shape = "") +
-    geom_point(aes(fill = covid,
-                   group = id,),
-               shape = 21,
-               size = 3,
-               alpha = 0.7,
-               position = position_dodge(0.3)) +
-    ggtitle(colnames(dt_elisa)[i]) +
-    theme_bw()
-  print(p1)
-  
-  s1 <- summary(lm(resp ~ covid*dm,
-                   data = tmp))
-  
-  out[[i- 3]] <- data.table(protein = colnames(dt_elisa)[i],
-                            comparison = c("COVID - non-COVID",
-                                           "DM - non-DM",
-                                           "COVID*DM Interaction"),
-                            diff = round(s1$coefficients[-1, 1], 3),
-                            se_diff = round(s1$coefficients[-1, 2], 3),
-                            pval = round(s1$coefficients[-1, 4], 3))
+foo <- function(dx) {
+  return(tpm(formula_part1 = Log10Conc ~ `Study Group`*AnyDM,
+             formula_part2 = NULL,
+             link_part1 = "logit",
+             family_part2 = gaussian(link = "identity"),
+             data = dx))
 }
+
+m1 <- dt_elisa_l[, .(models = list(tpm(formula_part1 = Log10Conc ~ grp,
+                                       formula_part2 = NULL,
+                                       link_part1 = "logit",
+                                       family_part2 = gaussian(link = "identity"),
+                                       data = data.table(Log10Conc = Log10Conc,
+                                                         grp = grp)))),
+                 by = Protein]
 ```
+
+```{r}
+# m1$Protein
+#
+# mm1 <- m1$models[[1]]
+# s1 <- summary(mm1)
+# s1
+# 
+# est_ame <- AME(object = mm1,
+#                se.method = "delta")
+# 
+# est_ame <- AME(object = mm1,
+#                se.method = "bootstrap")
+# est_ame
+```
+
+```{r}
+out <- lapply(m1$models,
+              function(a) {
+                try({
+                  s1 <- summary(a)
+                  
+                  # Average Marginal Effect
+                  # est_ame <- AME(object = a,
+                  #                se.method = "bootstrap")
+                  # NOTE: convergence issues iwth bootstrap!
+                  
+                  est_ame <- AME(object = a,
+                                 se.method = "delta")
+                  
+                  rbindlist(list(data.table(Model = "Logistic",
+                                            Comparisons = c("COVID/No DM - No COVID/No DM",
+                                                            "No COVID/DM - No COVID/No DM",
+                                                            "COVID/DM - No COVID/No DM"),
+                                            Estimated = "Odds Ratio of Finding the Protein (non-zero)",
+                                            Estimate = exp(s1$Firstpart.model$coefficients[-1, 1]),
+                                            CILB = exp(s1$Firstpart.model$coefficients[-1, 1] - 
+                                                         1.96*s1$Firstpart.model$coefficients[-1, 2]),
+                                            CIUB = exp(s1$Firstpart.model$coefficients[-1, 1] + 
+                                                         1.96*s1$Firstpart.model$coefficients[-1, 2]),
+                                            pVal = s1$Firstpart.model$coefficients[-1, 4]),
+                                 
+                                 data.table(Model = "Gaussian",
+                                            Comparisons = c("COVID/No DM - No COVID/No DM",
+                                                            "No COVID/DM - No COVID/No DM",
+                                                            "COVID/DM - No COVID/No DM"),
+                                            Estimated = "Log10(Concentration [pg/mL] + 1) Difference",
+                                            Estimate = s1$Secondpart.model$coefficients[-1, 1],
+                                            CILB = s1$Secondpart.model$coefficients[-1, 1] - 
+                                              1.96*s1$Secondpart.model$coefficients[-1, 2],
+                                            CIUB = s1$Secondpart.model$coefficients[-1, 1] + 
+                                              1.96*s1$Secondpart.model$coefficients[-1, 2],
+                                            pVal = s1$Secondpart.model$coefficients[-1, 4]),
+                                 data.table(Model = "Average Marginal Effect",
+                                            Comparisons = c("COVID/No DM - No COVID/No DM",
+                                                            "No COVID/DM - No COVID/No DM",
+                                                            "COVID/DM - No COVID/No DM"),
+                                            Estimated = "Log10(Concentration [pg/mL] + 1) Difference",
+                                            Estimate = est_ame$dydx,
+                                            CILB = est_ame$CI.L,
+                                            CIUB = est_ame$CI.U,
+                                            pVal = est_ame$pvalue)))
+                })
+              })
+
+out <- do.call("rbind",
+               out)
+
+out <- data.table(Protein = rep(m1$Protein,
+                                each = 9),
+                  out)
+
+write.csv(out,
+          "../tmp/two_part_models_elisa.csv",
+          row.names = FALSE)
+head(out)
+```
+
+```{r}
+out$Estimate[is.infinite(out$CIUB)] <-  NA
+out$CILB[is.infinite(out$CIUB)] <-  NA
+out$CIUB[is.infinite(out$CIUB)] <- NA
+```
+
+### Logistic
+```{r,fig.height=8,fig.width=7}
+p1 <- ggplot(data = out[Model == "Logistic", ],
+             aes(x = Estimate,
+                 xmin = CILB,
+                 xmax = CIUB,
+                 y = Comparisons,
+                 fill = Comparisons)) +
+  facet_wrap(~ Protein,
+             scale = "free_x",
+             ncol = 3) +
+  geom_errorbarh(height = 0.4) +
+  geom_vline(xintercept = 1,
+             linetype = "dashed") +
+  geom_point(shape = 21,
+             size = 3) +
+  scale_x_continuous("Odds Ratio of Observing Non-Zero") +
+  ggtitle("Logistic Part of the Model") +
+  theme_bw() +
+  theme(legend.position = "none")
+
+tiff(filename = "../tmp/elisa_two_part_logist.tiff",
+     height = 8,
+     width = 7,
+     units = 'in',
+     res = 600,
+     compression = "lzw+p")
+print(p1)
+graphics.off()
+
+p1
+```
+
+### Gaussian
+```{r,fig.height=8,fig.width=7}
+p1 <- ggplot(data = out[Model == "Gaussian", ],
+             aes(x = Estimate,
+                 xmin = CILB,
+                 xmax = CIUB,
+                 y = Comparisons,
+                 fill = Comparisons)) +
+  facet_wrap(~ Protein,
+             scale = "free_x",
+             ncol = 3) +
+  geom_errorbarh(height = 0.3) +
+  geom_vline(xintercept = 0,
+             linetype = "dashed") +
+  geom_point(shape = 21,
+             size = 3) +
+  scale_x_continuous("Log10(Concentration [pg/mL] + 1) Difference") +
+  ggtitle("Gaussian Part of the Model") +
+  theme_bw() +
+  theme(legend.position = "none")
+
+tiff(filename = "../tmp/elisa_two_part_gaussian.tiff",
+     height = 8,
+     width = 7,
+     units = 'in',
+     res = 600,
+     compression = "lzw+p")
+print(p1)
+graphics.off()
+
+p1
+```
+
+### Average Marginal Effect
+```{r,fig.height=8,fig.width=7}
+p1 <- ggplot(data = out[Model == "Average Marginal Effect", ],
+             aes(x = Estimate,
+                 xmin = CILB,
+                 xmax = CIUB,
+                 y = Comparisons,
+                 fill = Comparisons)) +
+  facet_wrap(~ Protein,
+             scale = "free_x",
+             ncol = 3) +
+  geom_errorbarh(height = 0.3) +
+  geom_vline(xintercept = 0,
+             linetype = "dashed") +
+  geom_point(shape = 21,
+             size = 3) +
+  scale_x_continuous("Log10(Concentration [pg/mL] + 1) Difference") +
+  ggtitle("Average Marginal Effect") +
+  theme_bw() +
+  theme(legend.position = "none")
+
+tiff(filename = "../tmp/elisa_two_part_average_marginal_effect.tiff",
+     height = 8,
+     width = 7,
+     units = 'in',
+     res = 600,
+     compression = "lzw+p")
+print(p1)
+graphics.off()
+
+p1
+```
+
+## ELISA binarized
+```{r}
+dt_elisa_bin <-  copy(dt_elisa)
+dt_elisa_bin[, 4:ncol(dt_elisa)] <- lapply(dt_elisa[, 4:ncol(dt_elisa)],
+                                           function (a) {
+                                             return(as.numeric(a > 0))
+                                           })
+dt_elisa_bin
+```
+
+```{r}
+m1 <- factanal(x = dt_elisa[, 4:ncol(dt_elisa)],
+               factors = 1)
+
+m1
+
+m2 <- factanal(x = dt_elisa[, 4:ncol(dt_elisa)],
+               factors = 2)
+
+m2
+
+m3 <- factanal(x = dt_elisa[, 4:ncol(dt_elisa)],
+               factors = 3)
+
+m3
+```
+
+```{r}
+
+```
+
 
 ## LM results
 ```{r}
@@ -677,6 +1040,7 @@ res
 
 ## ELISA PCA
 ### PCA
+
 ```{r}
 m1 <- prcomp(dt_elisa[, -c(1:3)],
              center = TRUE,
@@ -685,6 +1049,7 @@ summary(m1)
 ```
 
 ### Scores (i.e. points)
+
 ```{r}
 dt_scr <- data.table(m1$x[, 1:2])
 dt_scr$covid <- dt_elisa$`Study Group`
@@ -696,6 +1061,7 @@ head(dt_scr)
 ```
 
 ### Loading (i.e. arrows)
+
 ```{r}
 dt_rot <- as.data.frame(m1$rotation[, 1:2])
 dt_rot$feat <- rownames(dt_rot)
@@ -704,6 +1070,7 @@ dt_rot
 ```
 
 ### Axis labels
+
 ```{r}
 u.axis.labs <- paste(colnames(dt_rot)[1:2], 
                      sprintf('(%0.1f%% explained var.)', 
@@ -712,6 +1079,7 @@ u.axis.labs
 ```
 
 ### Biplot by COVID
+
 ```{r,fig.width=8,fig.height=8}
 grp <- dt_scr$covid
 scl <- 30
@@ -756,6 +1124,7 @@ p1
 ```
 
 ### Biplot by COVID
+
 ```{r,fig.width=8,fig.height=8}
 grp <- dt_scr$dm
 scl <- 30
@@ -800,9 +1169,11 @@ p1
 ```
 
 # RNA-seq
-https://bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html  
+
+<https://bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html>
 
 ## Merge RNA-seq meta-data with clinical
+
 ```{r}
 rnaseq_meta_clin <- merge(rnaseq_meta,
                           dt1[, c("Real ID",
@@ -826,13 +1197,16 @@ rnaseq_meta_clin$Cohort <- factor(rnaseq_meta_clin$Cohort,
 ```
 
 ## Fragments Per Million (FPM)
+
 ### Sequencing depth
+
 ```{r}
 seq_d <- colSums(dt_rna[, -c(1:11)])
 hist(seq_d, 20)
 ```
 
 ### DESeq: all genes
+
 ```{r}
 ndx <- which(colnames(dt_rna) %in% rnaseq_meta_clin$sample_names)
 
@@ -846,6 +1220,7 @@ dds_all
 ```
 
 ### FPM
+
 ```{r}
 dt_fpm <- fpm(object = dds_all,
               robust = FALSE)
@@ -853,17 +1228,34 @@ dt_fpm[1:10, 1:5]
 colSums(dt_fpm)[1:5]
 ```
 
+```{r}
+tmp5
+
+xx <- data.table(fpm = dt_fpm[which(rownames(dt_fpm) == "ENSG00000165949"), ],
+                 sample_names = colnames(dt_fpm))
+
+xx <- merge(xx,
+            rnaseq_meta_clin,
+            by = "sample_names")
+xx
+
+boxplot(log10(xx$fpm + 1) ~ xx$Cohort)
+```
+
 ## Protein coding genes only
+
 ```{r}
 dt_rna_cod <- dt_rna[gene_biotype == "protein_coding",]
 ```
 
 ## Select samples with clinical information
+
 ```{r}
 ndx <- which(colnames(dt_rna_cod) %in% rnaseq_meta_clin$sample_names)
 ```
 
 ## DESeq
+
 ```{r}
 tmp <- as.matrix(dt_rna_cod[, ndx, with = FALSE])
 rownames(tmp) <- dt_rna_cod$gene_id
@@ -874,7 +1266,9 @@ dds_cod <- DESeqDataSetFromMatrix(countData = tmp,
 ```
 
 ## Filter out genes with small number of hits
+
 Keep the genes with at least 5 out of 92 samples having at least 10 hits each
+
 ```{r}
 # Number of samples with at least 10 hits in at least X samples
 min_n_hits <- c(1, 5, 10, 20, 50)
@@ -926,22 +1320,22 @@ dds_cod <- dds_cod[keep, ]
 ```
 
 ## COVID/non-COOVID
+
 ### Restructure design (model)
+
 ```{r}
 design(dds_cod) <- ~ Cohort
 ```
 
 ### Run DESeq
+
 ```{r}
 deseq_cod <- DESeq(dds_cod)
-
-# deseq <- DESeq(dds,
-#                fitType = "glmGamPoi")
-
 resultsNames(deseq_cod)
 ```
 
 ### Results
+
 ```{r}
 res <- results(deseq_cod)
 res[1:10, ]
@@ -987,6 +1381,7 @@ tmp5 <- out[abs(log2FoldChange) > 1 &
 ```
 
 ### Calculate the mean expressions of the selected genes
+
 ```{r}
 tmp <- dt_rna_cod[gene_name %in% tmp5$gene_name, ]
 tmp <- melt.data.table(data = tmp,
@@ -1128,6 +1523,7 @@ grid.arrange(p2,
 ```
 
 ### Table 3: COVID/non-COVID significant DEs
+
 ```{r}
 # mu <- tmp[, .(mu = exp(mean(log(Hits + 1))) - 1,
 #               med = median(Hits)),
@@ -1162,11 +1558,14 @@ write.csv(t3,
 t3
 ```
 
-### Pathway analysis
+### Reactom Pathway Analysis
+
 #### Top 18 genes
-Source: https://stackoverflow.com/questions/71131883/r-how-do-i-convert-gene-symbols-to-entrez-ids  
+
+Source: <https://stackoverflow.com/questions/71131883/r-how-do-i-convert-gene-symbols-to-entrez-ids>
 
 ##### Map gene names to Entrez IDs
+
 ```{r}
 dt_rpa1 <- merge(dt_rna[!is.na(entrez_id), 
                         c("gene_name",
@@ -1176,22 +1575,26 @@ dt_rpa1 <- merge(dt_rna[!is.na(entrez_id),
 ```
 
 ##### Run Reactom PA
+
 ```{r}
 rpa1 <- ReactomePA::enrichPathway(gene = dt_rpa1$entrez_id,
                                   readable = TRUE)
 
 write.csv(rpa1@result,
-          file = "tmp/rpa1.csv")
+          file = "tmp/Pathway Analysis of COVID19 18 differentially expresed genes.csv")
 
 rpa1@result
 ```
 
 ##### Barplot of pathways
+
+NOTE: by default only shows pathways with adjusted p-value \<0.05
+
 ```{r}
 barplot(rpa1,
-        showCategory = 10)
+        showCategory = 4,
+        title = "")
 ```
-
 
 ```{r}
 # viewPathway(pathName = rpa1@result$Description[1])
@@ -1212,35 +1615,50 @@ geneList1
 #      units = 'in',
 #      res = 300,
 #      compression = "lzw+p")
-# viewPathway(pathName = rpa1@result$Description[1],
-#             readable = TRUE,
-#             foldChange = geneList1)
+viewPathway(pathName = rpa1@result$Description[17],
+            readable = TRUE,
+            foldChange = geneList1)
 # graphics.off()
 
 # for(i in 1:length(rpa1@result$Description)) {
-for(i in 1:10) {
-  try({
-    tiff(filename = paste0("tmp/",
-                           rpa1@result$Description[i],
-                           ".tiff"),
-         height = 8,
-         width = 8,
-         units = 'in',
-         res = 600,
-         compression = "lzw+p")
-    viewPathway(pathName = rpa1@result$Description[i],
-                readable = TRUE,
-                foldChange = geneList1)
-    graphics.off()
-  })
-}
+# for(i in 1:10) {
+#   try({
+#     tiff(filename = paste0("tmp/",
+#                            rpa1@result$Description[i],
+#                            ".tiff"),
+#          height = 8,
+#          width = 8,
+#          units = 'in',
+#          res = 600,
+#          compression = "lzw+p")
+#     viewPathway(pathName = rpa1@result$Description[i],
+#                 readable = TRUE,
+#                 foldChange = geneList1)
+#     graphics.off()
+#   })
+# }
 ```
 
+##### Enrichment analysis based on the DisGeNET
 
+<https://www.disgenet.org/>
 
-# !!!CONTINUE HERE, 2/21/2024!!!
+COVID19 Data on DisGeNET:\
+<https://www.disgenet.org/covid/diseases/summary/>
 
-##### Top 64 genes
+DisGeNET is a discovery platform containing one of the largest publicly available collections of genes and variants associated to human diseases ( Piñero et al., 2021; Piñero et al., 2019; Piñero et al., 2016; Piñero et al., 2015). DisGeNET integrates data from expert curated repositories, GWAS catalogues, animal models and the scientific literature. DisGeNET data are homogeneously annotated with controlled vocabularies and community-driven ontologies. Additionally, several original metrics are provided to assist the prioritization of genotype--phenotype relationships.
+
+The current version of DisGeNET (v7.0) contains 1,134,942 gene-disease associations (GDAs), between 21,671 genes and 30,170 diseases, disorders, traits, and clinical or abnormal human phenotypes, and 369,554 variant-disease associations (VDAs), between 194,515 variants and 14,155 diseases, traits, and phenotypes.
+
+```{r}
+tt1 <- DOSE::enrichDGN(dt_rpa1$entrez_id)
+tt1@result
+
+# barplot(tt1)
+```
+
+#### Top 64 genes
+
 ```{r}
 tmp6 <- out[abs(log2FoldChange) > 0.5 &
               padj < 0.1, ]
@@ -1257,42 +1675,29 @@ gene_list_2
 ```{r}
 rpa2 <- ReactomePA::enrichPathway(gene = gene_list_2,
                                   readable = TRUE)
+
+write.csv(rpa2@result,
+          file = "tmp/Pathway Analysis of COVID19 64 differentially expresed genes.csv")
+
 rpa2@result
-
-write.csv(x = rpa2@result,
-          file = "tmp/rpa2.csv")
 ```
 
+## AnyDM/no DM
+
 ```{r}
-barplot(rpa2)
+design(dds_cod) <- ~ AnyDM
 ```
 
-### DESeq: AnyDM/no DM
+### Run DESeq
+
 ```{r}
-tmp <- as.matrix(dt_rna_cod[, ndx, with = FALSE])
-rownames(tmp) <- dt_rna_cod$gene_id
-
-dds_cod_dm <- DESeqDataSetFromMatrix(countData = tmp, 
-                                     colData = rnaseq_meta_clin,
-                                     ~ AnyDM)
-```
-
-#### Filter out genes with small number of hits
-```{r}
-keep <- rowSums(counts(dds_cod_dm) >= 10) >= 10
-sum(keep)
-
-dds_cod_dm <- dds_cod_dm[keep, ]
-```
-
-#### Run DESeq
-```{r}
-deseq_cod_dm <- DESeq(dds_cod_dm)
+deseq_cod_dm <- DESeq(dds_cod)
 
 resultsNames(deseq_cod_dm)
 ```
 
-#### DESeq results
+### DESeq results
+
 ```{r}
 res_dm <- results(deseq_cod_dm)
 res_dm[1:10, ]
@@ -1327,16 +1732,17 @@ write.csv(out_dm,
 ```
 
 ```{r}
-tmp6 <- out_dm[abs(log2FoldChange) > 1 &
+tmp7 <- out_dm[abs(log2FoldChange) > 1 &
                  padj < 0.05, ]
 ```
 
-#### Calculate the mean expressions of the selected genes
+### Calculate the mean expressions of the selected genes
+
 ```{r}
-tmp <- dt_rna_cod[gene_name %in% tmp6$gene_name, ]
+tmp <- dt_rna_cod[gene_name %in% tmp7$gene_name, ]
 tmp <- melt.data.table(data = tmp,
                        id.vars = 1,
-                       measure.vars = 11:ncol(tmp),
+                       measure.vars = 12:ncol(tmp),
                        variable.name = "sample_names",
                        value.name = "Hits")
 
@@ -1345,7 +1751,8 @@ tmp <- merge(tmp,
              by = "sample_names")
 ```
 
-#### Table 3: DM/no DM significant DEs
+### Table 4: DM/no DM significant DEs
+
 ```{r}
 med <- tmp[, .(med = median(Hits)),
            by = list(gene_name,
@@ -1355,10 +1762,10 @@ med <- dcast.data.table(data = med,
                         value.var = "med")
 med
 
-t4 <- data.table(gene_name = tmp6$gene_name,
-                 `Log2 Fold Change` = round(tmp6$log2FoldChange, 2),
-                 `SE of Log2 Fold Change` = round(tmp6$log2FoldChangeSE, 2),
-                 `Adjusted p-Value` = round(tmp6$padj, 3))
+t4 <- data.table(gene_name = tmp7$gene_name,
+                 `Log2 Fold Change` = round(tmp7$log2FoldChange, 2),
+                 `SE of Log2 Fold Change` = round(tmp7$log2FoldChangeSE, 2),
+                 `Adjusted p-Value` = round(tmp7$padj, 3))
 
 t4 <- merge(med,
             t4,
@@ -1379,7 +1786,165 @@ sum(t4$`Log2 Fold Change` > 0)
 sum(t4$`Log2 Fold Change` < 0)
 ```
 
+### Reactom PA
+
+```{r}
+gene_list_3 <- mapIds(org.Hs.eg.db,
+                      keys = tmp7$gene_name,
+                      column = "ENTREZID",
+                      keytype = "SYMBOL")
+length(gene_list_3)
+```
+
+```{r}
+rpa3 <- ReactomePA::enrichPathway(gene = gene_list_3,
+                                  readable = TRUE)
+
+write.csv(rpa3@result,
+          file = "tmp/Pathway Analysis of DM 431 differentially expresed genes.csv")
+
+rpa3@result
+```
+
+## DM in COVID/non-COVID
+
+### Prepare DDS
+
+```{r}
+ndx1 <- which(colnames(dt_rna_cod) %in% rnaseq_meta_clin$sample_names[rnaseq_meta_clin$AnyDM == 1])
+
+tmp <- as.matrix(dt_rna_cod[,
+                            ndx1,
+                            with = FALSE])
+dim(tmp)
+rownames(tmp) <- dt_rna_cod$gene_id
+
+dds_dm <- DESeqDataSetFromMatrix(countData = tmp, 
+                                  colData = rnaseq_meta_clin[rnaseq_meta_clin$AnyDM == 1, ],
+                                  design = ~ Cohort)
+dds_dm
+```
+
+### Run DESeq
+
+```{r}
+deseq_cod_dm <- DESeq(dds_dm)
+resultsNames(deseq_cod_dm)
+```
+
+### Results
+
+```{r}
+res <- results(deseq_cod_dm)
+res[1:10, ]
+rownames(res)[1:10]
+```
+
+```{r}
+out <- data.table(gene_id = rownames(res),
+                  baseMean = res$baseMean,
+                  log2FoldChange = res$log2FoldChange,
+                  log2FoldChangeSE = res$lfcSE,
+                  stat = res$stat,
+                  pvalue = res$pvalue,
+                  padj = res$padj)
+
+out <- merge(dt_rna_cod[, c("gene_name",
+                            "gene_id")],
+             out,
+             by = "gene_id")
+
+out <- out[!is.na(padj), ]
+
+setorder(out, 
+         padj)
+
+
+head(out)
+
+write.csv(out,
+          file = "tmp/deseq2_cod_dm_only_covid_nocovid.CSV",
+          row.names = FALSE)
+```
+
+```{r}
+tmp8 <- out[abs(log2FoldChange) > 1 &
+              padj < 0.05, ]
+```
+
+### Calculate the mean expressions of the selected genes
+
+```{r}
+tmp <- dt_rna_cod[gene_name %in% tmp8$gene_name, ]
+tmp <- melt.data.table(data = tmp,
+                       id.vars = 1,
+                       measure.vars = 12:ncol(tmp),
+                       variable.name = "sample_names",
+                       value.name = "Hits")
+
+tmp <- merge(tmp,
+             rnaseq_meta_clin,
+             by = "sample_names")
+```
+
+### Table 5: COVID/non-COVID, DM only
+
+```{r}
+med <- tmp[, .(med = median(Hits)),
+           by = list(gene_name,
+                     Cohort)]
+med <- dcast.data.table(data = med,
+                        gene_name ~ Cohort,
+                        value.var = "med")
+med
+
+t5 <- data.table(gene_name = tmp8$gene_name,
+                 `Log2 Fold Change` = round(tmp8$log2FoldChange, 2),
+                 `SE of Log2 Fold Change` = round(tmp8$log2FoldChangeSE, 2),
+                 `Adjusted p-Value` = round(tmp5$padj, 3))
+
+t5 <- merge(med,
+            t5,
+            by = "gene_name")
+
+names(t5)[1:3] <- c("Gene",
+                    "Median hits in non-COVID",
+                    "Median hits in COVID")
+
+write.csv(t5,
+          file = "tmp/t5.csv",
+          row.names = FALSE)
+t5
+```
+
+### Reactom Pathway Analysis
+
+##### Map gene names to Entrez IDs
+
+```{r}
+dt_rpa8 <- merge(dt_rna[!is.na(entrez_id), 
+                        c("gene_name",
+                          "entrez_id")],
+                 tmp8[, c("gene_name",
+                          "log2FoldChange")])
+```
+
+##### Run Reactom PA
+
+```{r}
+rpa8 <- ReactomePA::enrichPathway(gene = dt_rpa8$entrez_id,
+                                  readable = TRUE)
+
+write.csv(rpa8@result,
+          file = "tmp/Pathway Analysis of COVID vs non-COVID differentially expresed genes in DM.csv")
+
+rpa8@result
+```
+
+# !CONTINUE HERE 2/22/24!
+
 ### DE in COVID and DM
+
 ```{r}
 covid_and_dm <- t4$Gene[t4$Gene %in% t3$Gene]
 covid_and_dm
@@ -1482,6 +2047,7 @@ grid.arrange(p4,
 ```
 
 ### DESeq: AnyDM/no DM in COVID patients only
+
 ```{r}
 samples_covid_only <- rnaseq_meta_clin$sample_names[rnaseq_meta_clin$Cohort == "COVID"]
 ndx_covid_only <- which(colnames(dt_rna_cod) %in% samples_covid_only)
@@ -1495,6 +2061,7 @@ dds_cod_dm_covid_only <- DESeqDataSetFromMatrix(countData = tmp,
 ```
 
 #### Filter out genes with small number of hits
+
 ```{r}
 keep <- rowSums(counts(dds_cod_dm_covid_only) >= 10) >= 10
 sum(keep)
@@ -1503,6 +2070,7 @@ dds_cod_dm_covid_only <- dds_cod_dm_covid_only[keep, ]
 ```
 
 #### Run DESeq
+
 ```{r}
 deseq_cod_dm_covid_only <- DESeq(dds_cod_dm_covid_only)
 
@@ -1510,12 +2078,12 @@ resultsNames(deseq_cod_dm_covid_only)
 ```
 
 #### DESeq results
+
 ```{r}
 res_dm_covid_only <- results(deseq_cod_dm_covid_only)
 res_dm_covid_only[1:10, ]
 rownames(res_dm_covid_only)[1:10]
 ```
-
 
 ```{r}
 out_dm_covid_only <- data.table(gene_id = rownames(res_dm_covid_only),
@@ -1550,6 +2118,7 @@ tmp7 <- out_dm_covid_only[abs(log2FoldChange) > 1 &
 ```
 
 #### Calculate the mean expressions of the selected genes
+
 ```{r}
 tmp <- dt_rna_cod[gene_name %in% tmp7$gene_name, ]
 tmp <- melt.data.table(data = tmp,
@@ -1564,6 +2133,7 @@ tmp <- merge(tmp,
 ```
 
 #### Table 3: DM/no DM significant DEs
+
 ```{r}
 # med <- tmp[, .(med = median(Hits)),
 #            by = list(gene_name,
@@ -1598,6 +2168,7 @@ tmp <- merge(tmp,
 ```
 
 # Session
+
 ```{r}
 sessionInfo()
 ```
