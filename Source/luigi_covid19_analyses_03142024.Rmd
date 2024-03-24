@@ -1,10 +1,20 @@
 ---
-title: "Luigi's COVID-19 Analyses"
-output: html_notebook
+title: "Data Analysis: Genetic and inflammatory signatures associated with worse prognosis in hospitalized patients with severe SARS-CoV-2 infection and diabetes."
+author: Davit Sargsyan
+output:
+  html_notebook:
+    highlight: tango
+    toc: true
+    toc_float: true
+    toc_depth: 6
+    number_sections: yes
+    code_folding: hide
 ---
 
 Created: 9/6/2023\
-Last update: 02/20/2024
+Last update: 3/15/2024
+
+# Background
 
 Analysis datasets and copy of the Rmd are in Rutgers box:\
 <https://rutgers.app.box.com/folder/227391194192>
@@ -12,34 +22,86 @@ Analysis datasets and copy of the Rmd are in Rutgers box:\
 GitHub Repo:\
 <https://github.com/sargdavid/luigi_covid19>
 
+**Meeting 3/14/2024:**
+
+1.  Lu: cytokine storm can more likely happen to the ICU/sever patients. Therefore, stratify by severity etc.
+2.  My ELISA set is still missing ACE2 and DPP4. I need to check the data to see why these columns got deleted.
+3.  The 21 proteins included in the attached were measured in pg/mL but the missing ones in ug/mL.
+4.  `twopartm::AME` did not converge with the bootstrap option for the 95%CI. Therefore, I used the delta method. Need to check the convergence issue tomorrow with Javier and Yajie.
+
+**ToDo-s:**
+
+1.  Explore why DM prevents INFa and IL-10 increase in COVID patients (i.e., why concentrations of these proteins is high COVID/No DM but not in COVID/DM).
+2.  What are the profiles of pritein-non-producing patients?
+3.  Use Log2 in ELISA so the differences are 2-fold changes.
+4.  On forest plots, show ratios, not log-ratios.
+5.  Transform the data using quantile or Fisher-Yates normalization (`DNAMR::cnormalize`)
+6.  Apply tow-part model to normalized gene expressions.
+7.  Reactom Pathway Analysis (`ReactomPA`) repeated on these sets of genes
+8.  Factor analysis of gene expressions. Compare the factors with Gene Ontology, Reactom Pathways, KEGG pathways etc. Include Module Analysis (see [WGCNA: Weighted Correlation Network Analysis](https://bmcbioinformatics.biomedcentral.com/articles/10.1186/1471-2105-9-559) by Steve Horvath. We used it in [the lncRNA paper](https://insight.jci.org/articles/view/168988?utm_source=TrendMD&utm_medium=cpc&utm_campaign=JCI_Insight_TrendMD_0). Can be more applicable for Paper 2 on lncRNAs.)
+
+**Feedback from stats AI meeting 3/8/2024:**
+
+1.  Use [R package MOFA](https://www.bioconductor.org/packages/release/bioc/html/MOFA2.html) (Bernard)
+2.  Check R package [Diablo](http://mixomics.org/mixdiablo/) (part of [mixOmix](https://bioconductor.org/packages/release/bioc/html/mixOmics.html)?) and [COMBI](https://www.bioconductor.org/packages/release/bioc/html/combi.html).
+3.  Causal representative learning and causal graphs/networks for coding/non-coding RNA interactions (Mingshi).
+4.  Color modules (Caesar, Stefan & John).
+5.  Factor analysis using `psych::fa` function (instead of `stats::factanal`).
+6.  Gene ontology to connect factors to GOs (Javier) 7. Ask Lu if I can share Table 1 with Michael Katehakis
+
+**Meeting 2/1/2024:**
+
+1.  RNA vs. ELISA - need to know coding genes
+2.  List of genes from Lu
+3.  IFI27: what cyto/ cemokine is associated with it (from ELISA panel)? Cytokines should regulate IFI27
+4.  BAMBI vs ACE2 (new ELISA)
+5.  Find specific proteins (ELISA) that result in the expression of another gene
+6.  Pathway analysis with `ReactomPA` (DONE)
+7.  Focus on DM
+8.  Factor analysis
+9.  Anti-IL6 was used in pandemic. Look at INFg, IL1, IL6 and TNFa
+
+**Javier, 9/15/2023:**
+
+1.  Build survival model using LOS as dates. Assuming all death are in-hospital, end of LOS.
+
+**Meeting 9/19/23:**
+
+1.  Was everybody admitted with COVID-19 symptoms? In Marshall's email from 11/14/23 8:01AM he said "not sure [admission DX] will be necessary since admitting DX will be COVID". Does this mean that controls where also admitted with COVID diagnoses? How?
+2.  Do survival for in-patients only using LOS.
+3.  Look at LOS of dead patients.
+4.  Do DM patients have higher WHO OSCI score at admission?
+5.  COVID+DM = more likely to go to ICU vs COVID+noDM? 6. Outcomes: death, LOS, ventilation, ICU.
+
+**Meeting 9/7/23:**
+
+1.  Look at inflammation signature w/wo DM, stratified by COVID.
+2.  In COVID, coagulation cascade pathway was affected. See if we can find it in clin. data, ELIZA or RNA-seq. Should coagulation be considered in COVID patients' treatment?
+3.  Coding/non-coding gene co-expression.
+4.  Activation of inflammatory pathways because we have transcriptome, not just genome.
+5.  Neanderthals' genes (see Lu's email).
+6.  Important factors: Critical care, WHO OSCI, LOS, ACE inhibitors, age\>55, HTN, DM.
+
 # Setup
 
 ```{r setup}
 options(scipen = 999)
 
-# install.packages("zlibbioc_1.48.0.tar.gz",
-#                  repos = NULL,
-#                  type = "source")
-
-# if (!require("BiocManager",
-#              quietly = TRUE))
-# BiocManager::install("MOFA2")
-
 # if (!require("BiocManager",
 #              quietly = TRUE))
 # install.packages("BiocManager")
 # BiocManager::install("ReactomePA")
-# BiocManager::install("org.Hs.eg.db")
 
 require(data.table)
 require(ggplot2)
 require(table1)
+require(twopartm)
+require(psych)
+require(psychTools)
+require(GPArotation)
+
 require(DESeq2)
 require(ReactomePA)
-require(org.Hs.eg.db)
-# require(zlibbioc)
-# require(MOFA2)
-require(psych)
 
 require(tidyverse)
 require(tidytlg)
@@ -47,67 +109,28 @@ require(gridExtra)
 require(nnet)
 
 # Not Used:
+# install.packages("zlibbioc_1.48.0.tar.gz",
+#                  repos = NULL,
+#                  type = "source")
+
+# if (!require("BiocManager",
+#              quietly = TRUE))
+# BiocManager::install("MOFA2")
+#
+
 # require(NBZIMM)::lme.zig(fixed = logTPM ~ ibd_infl,
 #                          random = ~ 1| Batch,
 #                          zi_fixed = ~ ibd_infl,
 #                          data = dt,
 #                          verbose = FALSE)
 # BiocManager::install("clusterProfiler")
+
 # require(clusterProfiler)
 # require(gt)
 # require(rtables)
+# require(zlibbioc)
+# require(MOFA2)
 ```
-
-**Meeting 3/14/2024:**  
-1. Lu: cytokine storm can more likely happen to the ICU/sever patients. Therefore, stratify by severity etc.  
-2.	My ELISA set is still missing ACE2 and DPP4. I need to check the data to see why these columns got deleted.  
-3.	The 21 proteins included in the attached were measured in pg/mL but the missing ones in ug/mL  
-4.	Twopartm::AME did not converge with the bootstrap option for the 95%CI. Therefore, I used the delta method. Need to check the convergence issue tomorrow with Javier and Yajie.  
-
-*ToDos:*  
-1.	Transform the data using quantile or Fisher-Yates normalization (DNAMR::cnormalize), and perform factor analysis (psych::fa instead of factanal)  
-2.	Apply tow-part model to normalized gene expressions.  
-3.	Reactom Pathway Analysis (ReactomPA) repeated on these sets of genes  
-4.	Factor analysis of gene expressions. Compare the factors with Gene Ontology, Reactom Pathways, KEGG pathways etc. Include Module Analysis (see WGCNA: Weighted Correlation Network Analysis by Steve Horvath. We used it in lncRNA paper. Can be more applicable for Paper 2 on lncRNAs.)  
-
-**Feedbakc from stats AI meeting 3/8/2024:**  
-1. Use MOFA (Bernard)  
-2. Check Diabolo and COMBI packages  
-3. Causal representative learning and causal graphs/networks for coding/non-coding RNA interactions (Mingshi)  
-4. Color modules (Caesar, Stefan & John)  
-5. Factor analysis  
-6. Gene ontology to connect factors to GOs (Javier) 
-7. Ask Lu if I can share Table 1 with Michael Katehakis  
-
-**Meeting 2/1/2024:**   
-1. RNA vs. ELISA - need to know coding genes  
-2. Neanderthal genes  
-3. List of genes from Lu  
-4. IFI27: what cyto/ cemokine is associated with it (from ELISA panel)? Cytokines should regulate IFI27  
-5. BAMBI vs ACE2 (new ELISA)  
-6. Find specific proteins (ELISA) that result in the expression of another gene  
-7. Pathway analysis with ReactomPA (DONE)  
-8. Focus on DM  
-9. Factor analysis  
-10. Anti-IL6 was used in pandemic. Look at INFg, IL1, IL6 and TNFa  
-  
-**Javier, 9/15/2023:**  
-1. Build survival model using LOS as dates. Assuming all death are in-hospital, end of LOS.
-
-**Meeting 9/19/23:**  
-1. Was everybody admitted with COVID-19 symptoms? In Marshall's email from 11/14/23 8:01AM he said "not sure [admission DX] will be necessary since admitting DX will be COVID". Does this mean that controls where also admitted with COVID diagnoses? How?\
-2. Do survival for in-patients only using LOS.\
-3. Look at LOS of dead patients.\
-4. Do DM patients have higher WHO OSCI score at admission?\
-5. COVID+DM = more likely to go to ICU vs COVID+noDM? 6. Outcomes: death, LOS, ventilation, ICU.
-
-**Meeting 9/7/23:**  
-1. Look at inflammation signature w/wo DM, stratified by COVID.\
-2. in COVID, coagulation cascade pathway was affected. See if we can find it in clin. data, ELIZA or RNA-seq. Should coagulation be considered in COVID patients' treatment?\
-3. Coding/non-coding gene co-expression.\
-4. Activation of inflammatory pathways because we have transcriptome, not just genome.\
-5. Neanderthals' genes (see Lu's email).\
-6. Important factors: Critical care, WHO OSCI, LOS, ACE inhibitors, age\>55, HTN, DM.
 
 ```{r}
 # rows_empty <- function(mat) {
@@ -186,7 +209,9 @@ load("../Data/rfa.RData")
 ```
 
 # Clinical Data
+
 ## Table 1
+
 ```{r}
 t1 <- table1( ~.| `Study Group` + AnyDM,
               data = dt1[, -c("Real ID",
@@ -208,6 +233,7 @@ write.table (t1 ,
 ```
 
 ## DX1 Analysis
+
 ```{r}
 length(unique(rfa$Level1))
 level1_n <- rfa[, .(N_Level1 = .N),
@@ -219,6 +245,7 @@ level1_n
 ```
 
 ### In-hospital death DX1
+
 ```{r}
 tmp1 <- rfa[Expired == 1,
            c("Real ID",
@@ -236,6 +263,7 @@ tmp1 <- rfa[Expired == 1,
 ```
 
 ### 90-Day after discharge death DX1
+
 ```{r}
 tmp2 <- rfa[rfa$`90 Day Mortality` == 1,
            c("Real ID",
@@ -253,6 +281,7 @@ tmp2 <- rfa[rfa$`90 Day Mortality` == 1,
 ```
 
 ### 90-Day after discharge readmission DX1
+
 ```{r}
 tmp3 <- rfa[rfa$`90 Day Readmission`== 1,
            c("Real ID",
@@ -282,7 +311,9 @@ level2_n
 ```
 
 ## Death
+
 ### Death vs. COVID
+
 ```{r}
 addmargins(table(Death = dt1$Expired,
                  COVID = dt1$`Study Group`))
@@ -314,6 +345,7 @@ out1
 ```
 
 ### Death vs DM, COVID only
+
 ```{r}
 covid <- droplevels(dt1[`Study Group` == "COVID", ])
 
@@ -327,6 +359,7 @@ nocovid <- droplevels(dt1[`Study Group` != "COVID", ])
 ```
 
 ### Death vs Obese, COVID only
+
 ```{r}
 chisq.test(covid$Expired,
            covid$Obese)
@@ -656,22 +689,31 @@ dt1$LOS[dt1$`Real ID` == 771982]
 ```
 
 # ELISA
+
 ```{r}
 dt_elisa <- data.table(dt1[, c("Real ID",
                                "Study Group",
                                "AnyDM")],
-                       dt1[, `G-CSF (CSF-3)`:`TNF beta`])
+                       dt1[, `G-CSF (CSF-3)`:`ACE2 (ng/ml)`])
 
-# Remove patients with no ELISA data
-dt_elisa <- dt_elisa[!is.na(`G-CSF (CSF-3)`), ]
+n_col <- ncol(dt1[, `G-CSF (CSF-3)`:`ACE2 (ng/ml)`])
+
+## Remove patients with no ELISA data
+# ndx <- which(rowSums(is.na(dt1[, `G-CSF (CSF-3)`:`ACE2 (ng/ml)`])) == n_col)
+# ndx
+# dt_elisa <- dt_elisa[-ndx, ]
+
+# Remove patients with most ELISA data missing
+dt_elisa <- dt_elisa[!is.na(dt_elisa$`G-CSF (CSF-3)`), ]
 
 addmargins(table(COVID = dt_elisa$`Study Group`,
-      AnyDM = dt_elisa$AnyDM))
+                 AnyDM = dt_elisa$AnyDM))
 
 summary(dt_elisa)
 ```
 
 ## ELISA long format
+
 ```{r}
 dt_elisa_l <- melt.data.table(data = dt_elisa,
                               id.vars = 1:3,
@@ -683,32 +725,48 @@ dt_elisa_l[, grp := factor(paste(`Study Group`,
                                  AnyDM,
                                  sep = "_"),
                            levels = c("No COVID_0",
-                                      "COVID_0",
                                       "No COVID_1",
+                                      "COVID_0",
                                       "COVID_1"),
                            labels = c("No COVID/No DM",
-                                      "COVID/No DM",
                                       "No COVID/DM",
+                                      "COVID/No DM",
                                       "COVID/DM"))]
 
-dt_elisa_l$Log10Conc <- log10(dt_elisa_l$`Concentration[pg/mL]` + 1)
+dt_elisa_l$Log2Conc <- log2(dt_elisa_l$`Concentration[pg/mL]` + 1)
+
+# Remove NAs
+dt_elisa_l <- dt_elisa_l[!is.na(Log2Conc), ]
 ```
 
 ### Histograms
+
 ```{r,fig.height=10,fig.width=10}
-ggplot(dt_elisa_l,
-       aes(x = `Concentration[pg/mL]`)) +
+p1 <- ggplot(dt_elisa_l,
+             aes(x = `Concentration[pg/mL]`)) +
   facet_wrap(~ Protein,
              scale = "free") +
   geom_histogram(bins = 30) +
   theme_bw()
+
+tiff(filename = "../tmp/elisa_hist.tiff",
+     height = 10,
+     width = 10,
+     units = 'in',
+     res = 600,
+     compression = "lzw+p",)
+print(p1)
+graphics.off()
+
+p1
 ```
 
 ### Boxplot
+
 ```{r,fig.height=10,fig.width=10}
-ggplot(dt_elisa_l,
-       aes(x = grp,
-           y = `Concentration[pg/mL]`)) +
+p1 <- ggplot(dt_elisa_l,
+             aes(x = grp,
+                 y = `Concentration[pg/mL]`)) +
   facet_wrap(~ Protein,
              scale = "free_y") +
   geom_boxplot(outlier.shape = "") +
@@ -722,40 +780,77 @@ ggplot(dt_elisa_l,
   theme(legend.position = "none",
         axis.text.x = element_text(angle = 45,
                                    hjust = 1))
+
+tiff(filename = "../tmp/elisa_boxplot.tiff",
+     height = 10,
+     width = 10,
+     units = 'in',
+     res = 600,
+     compression = "lzw+p",)
+print(p1)
+graphics.off()
+
+p1
 ```
 
+## Log2 protein concentrations
 
-## Log10 protein concentrations
 ### Histogram
+
 ```{r,fig.height=10,fig.width=10}
 ggplot(dt_elisa_l,
-       aes(x = Log10Conc)) +
+       aes(x = Log2Conc)) +
   facet_wrap(~ Protein,
              scale = "free") +
   geom_histogram(bins = 30) +
   theme_bw()
+
+tiff(filename = "../tmp/elisa_log2_hist.tiff",
+     height = 10,
+     width = 10,
+     units = 'in',
+     res = 600,
+     compression = "lzw+p",)
+print(p1)
+graphics.off()
+
+p1
 ```
 
 ### Boxplots
+
 ```{r,fig.height=10,fig.width=10}
-ggplot(dt_elisa_l,
-       aes(x = grp,
-           y = Log10Conc)) +
+p1 <- ggplot(dt_elisa_l,
+             aes(x = grp,
+                 y = Log2Conc)) +
   facet_wrap(~ Protein,
              scale = "free_y") +
   geom_boxplot(outlier.shape = "") +
   geom_point(aes(fill = grp,
                  group = `Real ID`,),
              shape = 21,
-             size = 3,
+             size = 2,
              alpha = 0.7,
              position = position_dodge(0.3)) +
   scale_x_discrete("") +
-  scale_y_discrete("Log10(Concentration[pg/mL] + 1)") +
+  scale_y_continuous("Concentration[pg/mL]",
+                     breaks = 0:15,
+                     labels = 2^(0:15) - 1) +
   theme_bw() +
   theme(legend.position = "none",
         axis.text.x = element_text(angle = 60,
                                    hjust = 1))
+
+tiff(filename = "../tmp/elisa_log2_boxplot.tiff",
+     height = 10,
+     width = 10,
+     units = 'in',
+     res = 600,
+     compression = "lzw+p",)
+print(p1)
+graphics.off()
+
+p1
 ```
 
 ```{r}
@@ -799,21 +894,22 @@ ggplot(dt_elisa_l,
 ```
 
 ## ELISA Two Part model
+
 ```{r}
 foo <- function(dx) {
-  return(tpm(formula_part1 = Log10Conc ~ `Study Group`*AnyDM,
+  return(tpm(formula_part1 = Log2Conc ~ `Study Group`*AnyDM,
              formula_part2 = NULL,
              link_part1 = "logit",
              family_part2 = gaussian(link = "identity"),
              data = dx))
 }
 
-m1 <- dt_elisa_l[, .(models = list(tpm(formula_part1 = Log10Conc ~ grp,
-                                       formula_part2 = NULL,
-                                       link_part1 = "logit",
-                                       family_part2 = gaussian(link = "identity"),
-                                       data = data.table(Log10Conc = Log10Conc,
-                                                         grp = grp)))),
+m1 <- dt_elisa_l[, .(models = list(try(tpm(formula_part1 = Log2Conc ~ grp,
+                                           formula_part2 = NULL,
+                                           link_part1 = "logit",
+                                           family_part2 = gaussian(link = "identity"),
+                                           data = data.table(Log2Conc = Log2Conc,
+                                                         grp = grp))))),
                  by = Protein]
 ```
 
@@ -901,7 +997,8 @@ out$CIUB[is.infinite(out$CIUB)] <- NA
 ```
 
 ### Logistic
-```{r,fig.height=8,fig.width=7}
+
+```{r,fig.height=9,fig.width=7}
 p1 <- ggplot(data = out[Model == "Logistic", ],
              aes(x = Estimate,
                  xmin = CILB,
@@ -922,7 +1019,7 @@ p1 <- ggplot(data = out[Model == "Logistic", ],
   theme(legend.position = "none")
 
 tiff(filename = "../tmp/elisa_two_part_logist.tiff",
-     height = 8,
+     height = 9,
      width = 7,
      units = 'in',
      res = 600,
@@ -934,7 +1031,8 @@ p1
 ```
 
 ### Gaussian
-```{r,fig.height=8,fig.width=7}
+
+```{r,fig.height=9,fig.width=7}
 p1 <- ggplot(data = out[Model == "Gaussian", ],
              aes(x = Estimate,
                  xmin = CILB,
@@ -955,7 +1053,7 @@ p1 <- ggplot(data = out[Model == "Gaussian", ],
   theme(legend.position = "none")
 
 tiff(filename = "../tmp/elisa_two_part_gaussian.tiff",
-     height = 8,
+     height = 9,
      width = 7,
      units = 'in',
      res = 600,
@@ -967,7 +1065,8 @@ p1
 ```
 
 ### Average Marginal Effect
-```{r,fig.height=8,fig.width=7}
+
+```{r,fig.height=9,fig.width=7}
 p1 <- ggplot(data = out[Model == "Average Marginal Effect", ],
              aes(x = Estimate,
                  xmin = CILB,
@@ -988,7 +1087,7 @@ p1 <- ggplot(data = out[Model == "Average Marginal Effect", ],
   theme(legend.position = "none")
 
 tiff(filename = "../tmp/elisa_two_part_average_marginal_effect.tiff",
-     height = 8,
+     height = 9,
      width = 7,
      units = 'in',
      res = 600,
@@ -999,39 +1098,168 @@ graphics.off()
 p1
 ```
 
-## ELISA binarized
-```{r}
-dt_elisa_bin <-  copy(dt_elisa)
-dt_elisa_bin[, 4:ncol(dt_elisa)] <- lapply(dt_elisa[, 4:ncol(dt_elisa)],
-                                           function (a) {
-                                             return(as.numeric(a > 0))
-                                           })
-dt_elisa_bin
-```
+## Factor analysis
+
+Source: <https://personality-project.org/r/psych/HowTo/factor.pdf>
+
+### Data
 
 ```{r}
-m1 <- factanal(x = dt_elisa[, 4:ncol(dt_elisa)],
-               factors = 1)
+dt_fa <- as.data.frame(log2(dt_elisa[, `G-CSF (CSF-3)`:`ACE2 (ng/ml)`] + 1)) 
+rownames(dt_fa) <- dt_elisa$`Real ID`
+
+describe(dt_fa)
+```
+
+### Plot pairs
+
+```{r,fig.height=20,fig.width=20}
+tiff(filename = "../tmp/elisa_pairs.tiff",
+     height = 20,
+     width = 20,
+     units = 'in',
+     res = 600,
+     compression = "lzw+p")
+pairs.panels(dt_fa)
+graphics.off()
+
+pairs.panels(dt_fa)
+```
+
+### Correlation coefficients
+
+```{r}
+psych::lowerCor(dt_fa)
+```
+
+### Correlation Heatmap
+
+```{r,fig.height=10,fig.width=10}
+tiff(filename = "../tmp/elisa_cor_heatmap.tiff",
+     height = 10,
+     width = 10,
+     units = 'in',
+     res = 600,
+     compression = "lzw+p")
+psych::corPlot(dt_fa)
+graphics.off()
+
+psych::corPlot(dt_fa)
+```
+
+### Diagram
+
+```{r}
+fa.diagram(dt_fa)
+```
+
+### Test number of factors
+
+```{r}
+m1 <- fa.parallel(x = dt_fa)
+
+plot(m1)
 
 m1
+```
 
-m2 <- factanal(x = dt_elisa[, 4:ncol(dt_elisa)],
-               factors = 2)
+### Very Simple Structure
 
-m2
+```{r}
+vss(dt_fa)
+```
 
-m3 <- factanal(x = dt_elisa[, 4:ncol(dt_elisa)],
-               factors = 3)
+### ICLUST algorithm
 
-m3
+Revelle, 1979
+
+```{r}
+psych::iclust(r.mat = dt_fa,
+              nclusters = 1)
+```
+
+### OMEGA
+
+```{r}
+omega(dt_fa)
+```
+
+### bassAckward
+
+```{r,fig.height=10,fig.width=7}
+bassAckward(dt_fa,
+            nfactors = 3)
+```
+
+### Alpha
+
+```{r}
+alpha(dt_fa)
+
+## This code doesn't work
+# my_keys <- make.keys(nvars = 23,
+#                     keys.list = list(first = c(1, 3, 5),
+#                                      second = c(2, 3, 10)))
+# my_keys
+# 
+# my_scores <- scoreItems(keys = my_keys,
+#                         items = dt_fa)
+# my_scores
+```
+
+### FA
+
+#### Model
+
+```{r}
+m1 <- psych::fa(r = dt_fa,
+                fm = "fa",
+                nfactors = 3)
+m1
+summary(m1)
+
+target.rot(m1)
+```
+
+#### Plot factors
+
+```{r,fig.height=5,fig.width=5}
+plot(m1)
+```
+
+#### Biplot
+
+```{r,fig.height=10,fig.width=10}
+psych::biplot.psych(m1)
+```
+
+#### Plot diagram
+
+```{r,fig.height=10,fig.width=6}
+fa.diagram(m1)
 ```
 
 ```{r}
+m1$scores
 
+m1$loadings
 ```
 
+# CONTINUE HERE 3/21/24
+
+## ELISA binarized
+
+```{r}
+# dt_elisa_bin <-  copy(dt_elisa)
+# dt_elisa_bin[, 4:ncol(dt_elisa)] <- lapply(dt_elisa[, 4:ncol(dt_elisa)],
+#                                            function (a) {
+#                                              return(as.numeric(a > 0))
+#                                            })
+# dt_elisa_bin
+```
 
 ## LM results
+
 ```{r}
 res <- rbindlist(out)
 # res$pval[res$pval == 0] <- "<0.001"
@@ -1039,6 +1267,7 @@ res
 ```
 
 ## ELISA PCA
+
 ### PCA
 
 ```{r}
