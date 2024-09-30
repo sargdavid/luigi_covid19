@@ -972,7 +972,7 @@ addmargins(table("WHO-OSCI D1" = dt1$`WHO-OSCI D1`,
 ### WHO-OSCI over time
 Source: https://stackoverflow.com/questions/10834382/keep-unused-levels-in-bar-plot  
 Source: https://stackoverflow.com/questions/3472980/how-to-change-facet-labels 
-  
+
 ```{r}
 tmp <- dt1[`Study Group` == "COVID",
            c("Real ID",
@@ -1072,9 +1072,9 @@ p2 <- ggplot(tmp2,
            stat = "identity") +
   scale_x_discrete("Day",
                    breaks = levels(tmp2$Day),
-                      labels = gsub(x = levels(tmp2$Day),
-                                    pattern = "WHO-OSCI ",
-                                    replacement = "")) +
+                   labels = gsub(x = levels(tmp2$Day),
+                                 pattern = "WHO-OSCI ",
+                                 replacement = "")) +
   scale_fill_discrete("WHO OSCI") +
   theme_bw() +
   theme(legend.position = "bottom")
@@ -2146,7 +2146,7 @@ setorder(out,
 head(out)
 
 write.csv(out,
-          file = "tmp/deseq2_cod_covid_nocovid.CSV",
+          file = "../tmp/deseq2_cod_covid_nocovid.CSV",
           row.names = FALSE)
 ```
 
@@ -2207,7 +2207,7 @@ p1 <- ggplot(tmp,
   theme_bw() +
   theme(legend.position = "bottom")
 
-tiff(filename = "tmp/fig1_sign_genes_cod.tiff",
+tiff(filename = "../tmp/fig1_sign_genes_cod.tiff",
      height = 10,
      width = 10,
      units = 'in',
@@ -2220,8 +2220,21 @@ p1
 ```
 
 ```{r,fig.height=5,fig.width=8}
+tmp$grp <- paste(tmp$Cohort,
+                 tmp$AnyDM,
+                 sep = "_")
+tmp$grp <- factor(tmp$grp,
+                  levels = c("No_COVID_0",
+                             "No_COVID_1",
+                             "COVID_0",
+                             "COVID_1"),
+                  labels = c("No COVID/No DM",
+                             "No COVID/DM",
+                             "COVID/No DM",
+                             "COVID/DM"))
+
 p2 <- ggplot(tmp[gene_name == "IFI27", ],
-             aes(x = Cohort,
+             aes(x = grp,
                  y = log2(Hits + 1))) +
   geom_boxplot(width = 0.3,
                outlier.shape = "") +
@@ -2229,8 +2242,9 @@ p2 <- ggplot(tmp[gene_name == "IFI27", ],
                  group = sample_names),
              size = 3,
              shape = 21,
-             alpha = 0.8,
+             alpha = 0.7,
              position = position_dodge(0.3)) +
+  scale_x_discrete("") +
   scale_y_continuous("Number of hits",
                      breaks = seq(from = 1,
                                   to = 20,
@@ -2238,19 +2252,19 @@ p2 <- ggplot(tmp[gene_name == "IFI27", ],
                      labels = (2^seq(from = 1,
                                      to = 20,
                                      by = 2)) - 1) +
-  scale_fill_discrete("In-Hospital Death",
-                      breaks = c(0, 1),
-                      labels = c("No",
-                                 "Yes")) +
-  ggtitle(paste(c("IFI27 expression in COVID-19 vs non-COVID patients.",
-                  "Difference of the means of log2[hits+1] > 1",
-                  "and adjusted p-value < 0.05"),
-                collapse = "\n")) +
+  scale_fill_manual("In-Hospital Death",
+                    breaks = c("No",
+                               "Yes"),
+                    values = c("green",
+                               "red")) +
+  ggtitle("IFI27 expression") +
   theme_bw() +
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45,
+                                   hjust = 1))
 
 p3 <- ggplot(tmp[gene_name == "IFI27", ],
-             aes(x = Cohort,
+             aes(x = grp,
                  y = log2(Hits + 1))) +
   geom_boxplot(width = 0.3,
                outlier.shape = "") +
@@ -2258,8 +2272,9 @@ p3 <- ggplot(tmp[gene_name == "IFI27", ],
                  group = sample_names),
              size = 3,
              shape = 21,
-             alpha = 0.8,
+             alpha = 0.7,
              position = position_dodge(0.3)) +
+  scale_x_discrete("") +
   scale_y_continuous("Number of hits",
                      breaks = seq(from = 1,
                                   to = 20,
@@ -2267,18 +2282,18 @@ p3 <- ggplot(tmp[gene_name == "IFI27", ],
                      labels = (2^seq(from = 1,
                                      to = 20,
                                      by = 2)) - 1) +
-  scale_fill_discrete("Critical Care",
-                      breaks = c(0, 1),
-                      labels = c("No",
-                                 "Yes")) +
-  ggtitle(paste(c("IFI27 expression in COVID-19 vs non-COVID patients.",
-                  "Difference of the means of log2[hits+1] > 1",
-                  "and adjusted p-value < 0.05"),
-                collapse = "\n")) +
+  scale_fill_manual("Critical Care",
+                      breaks = c("No",
+                                 "Yes"),
+                    values = c("green",
+                               "blue")) +
+  ggtitle("") +
   theme_bw() +
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45,
+                                   hjust = 1))
 
-tiff(filename = "tmp/fig2_ifi27_covid_noncovid.tiff",
+tiff(filename = "../tmp/fig2_ifi27_covid_noncovid.tiff",
      height = 6,
      width = 9,
      units = 'in',
