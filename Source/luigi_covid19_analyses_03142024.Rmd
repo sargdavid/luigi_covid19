@@ -87,7 +87,7 @@ GitHub Repo:\
 3.  Coding/non-coding gene co-expression.
 4.  Activation of inflammatory pathways because we have transcriptome, not just genome.
 5.  Neanderthals' genes (see Lu's email). <https://genome.ucsc.edu/Neandertal/>
-6.  Important factors: Critical care, WHO OSCI, LOS, ACE inhibitors, age\>55, HTN, DM.
+6.  Important factors: Critical care, WHO OSCI, LOS, ACE inhibitors, age>55, HTN, DM.
 
 # Setup
 
@@ -1157,7 +1157,25 @@ hist(log10(tt$`DPPIV (pg/ml)`[tt$`Study Group` == "No COVID"]),
 hist(log10(tt$`DPPIV (pg/ml)`[tt$`Study Group` == "COVID"]),
      20,
      lims = range(tt$`DPPIV (pg/ml)`))
-t.test(log10(tt$`DPPIV (pg/ml)`) ~ tt$`Study Group`)
+tt1 <- t.test(log10(tt$`DPPIV (pg/ml)`) ~ tt$`Study Group`)
+tt1
+
+10^tt1$estimate
+
+tt2 <- t.test(tt$`DPPIV (pg/ml)` ~ tt$`Study Group`)
+tt2
+
+tt[, .(mu = mean(`DPPIV (pg/ml)`),
+       se = sd(`DPPIV (pg/ml)`)/sqrt(.N)),
+   by = `Study Group`]
+
+tt[, .(mu = mean(`DPPIV (pg/ml)`),
+       se = sd(`DPPIV (pg/ml)`)/sqrt(.N)),
+   by = list(`Study Group`,
+             tt$AnyDM)]
+tt2 <- wilcox.test(`DPPIV (pg/ml)` ~ AnyDM,
+                   data = tt[`Study Group` == "COVID", ])
+tt2
 ```
 
 ## ACE2
@@ -1176,6 +1194,21 @@ hist(log10(tt$`ACE2 (ng/ml)`[tt$`Study Group` == "COVID"]),
      20,
      lims = range(tt$`ACE2 (ng/ml)`))
 t.test(log10(tt$`ACE2 (ng/ml)`) ~ tt$`Study Group`)
+
+tt2 <- t.test(tt$`ACE2 (ng/ml)` ~ tt$`Study Group`)
+tt2
+
+tt[, .(mu = mean(`ACE2 (ng/ml)`),
+       se = sd(`ACE2 (ng/ml)`)/sqrt(.N)),
+   by = `Study Group`]
+
+tt[, .(mu = mean(`ACE2 (ng/ml)`),
+       se = sd(`ACE2 (ng/ml)`)/sqrt(.N)),
+   by = list(`Study Group`,
+             tt$AnyDM)]
+tt2 <- wilcox.test(`ACE2 (ng/ml)` ~ AnyDM,
+                   data = tt[`Study Group` == "COVID", ])
+tt2
 ```
 
 # ELISA
@@ -1433,9 +1466,7 @@ out <- lapply(m1$models,
                                  se.method = "delta")
                   
                   rbindlist(list(data.table(Model = "Logistic",
-                                            Comparisons = c("COVID/No DM - No COVID/No DM",
-                                                            "No COVID/DM - No COVID/No DM",
-                                                            "COVID/DM - No COVID/No DM"),
+                                            Names = rownames(s1$Firstpart.model$coefficients)[-1],
                                             Estimated = "Odds Ratio of Finding the Protein (non-zero)",
                                             Estimate = exp(s1$Firstpart.model$coefficients[-1, 1]),
                                             CILB = exp(s1$Firstpart.model$coefficients[-1, 1] - 
@@ -1445,9 +1476,7 @@ out <- lapply(m1$models,
                                             pVal = s1$Firstpart.model$coefficients[-1, 4]),
                                  
                                  data.table(Model = "Gaussian",
-                                            Comparisons = c("COVID/No DM - No COVID/No DM",
-                                                            "No COVID/DM - No COVID/No DM",
-                                                            "COVID/DM - No COVID/No DM"),
+                                            Names = rownames(s1$Firstpart.model$coefficients)[-1],
                                             Estimated = "Log2(Concentration [pg/mL] + 1) Difference",
                                             Estimate = s1$Secondpart.model$coefficients[-1, 1],
                                             CILB = s1$Secondpart.model$coefficients[-1, 1] - 
@@ -1456,9 +1485,7 @@ out <- lapply(m1$models,
                                               1.96*s1$Secondpart.model$coefficients[-1, 2],
                                             pVal = s1$Secondpart.model$coefficients[-1, 4]),
                                  data.table(Model = "Average Marginal Effect",
-                                            Comparisons = c("COVID/No DM - No COVID/No DM",
-                                                            "No COVID/DM - No COVID/No DM",
-                                                            "COVID/DM - No COVID/No DM"),
+                                            Names = rownames(s1$Firstpart.model$coefficients)[-1],
                                             Estimated = "Log2(Concentration [pg/mL] + 1) Difference",
                                             Estimate = est_ame$dydx,
                                             CILB = est_ame$CI.L,
@@ -1474,6 +1501,14 @@ out <- data.table(Protein = rep(m1$Protein,
                                 each = 9),
                   out)
 
+out$Comparisons <- factor(out$Names,
+                          levels = c("grpCOVID/DM",
+                                     "grpCOVID/No DM",
+                                     "grpNo COVID/DM"),
+                          labels = c("COVID/DM - No COVID/No DM",
+                                     "COVID/No DM - No COVID/No DM",
+                                     "No COVID/DM - No COVID/No DM"))
+
 write.csv(out,
           "../tmp/two_part_models_elisa.csv",
           row.names = FALSE)
@@ -1488,7 +1523,7 @@ out$CIUB[is.infinite(out$CIUB)] <- NA
 
 ### Logistic
 
-```{r,fig.height=9,fig.width=7}
+```{r,fig.height=8,fig.width=9}
 p1 <- ggplot(data = out[Model == "Logistic", ],
              aes(x = Estimate,
                  xmin = CILB,
@@ -1497,7 +1532,7 @@ p1 <- ggplot(data = out[Model == "Logistic", ],
                  fill = Comparisons)) +
   facet_wrap(~ Protein,
              scale = "free_x",
-             ncol = 3) +
+             ncol = 4) +
   geom_errorbarh(height = 0.4) +
   geom_vline(xintercept = 1,
              linetype = "dashed") +
@@ -1509,8 +1544,8 @@ p1 <- ggplot(data = out[Model == "Logistic", ],
   theme(legend.position = "none")
 
 tiff(filename = "../tmp/elisa_two_part_logist.tiff",
-     height = 9,
-     width = 7,
+     height = 8,
+     width = 9,
      units = 'in',
      res = 600,
      compression = "lzw+p")
@@ -1522,7 +1557,7 @@ p1
 
 ### Gaussian
 
-```{r,fig.height=9,fig.width=7}
+```{r,fig.height=8,fig.width=9}
 p1 <- ggplot(data = out[Model == "Gaussian", ],
              aes(x = Estimate,
                  xmin = CILB,
@@ -1531,7 +1566,7 @@ p1 <- ggplot(data = out[Model == "Gaussian", ],
                  fill = Comparisons)) +
   facet_wrap(~ Protein,
              scale = "free_x",
-             ncol = 3) +
+             ncol = 4) +
   geom_errorbarh(height = 0.3) +
   geom_vline(xintercept = 0,
              linetype = "dashed") +
@@ -1543,8 +1578,8 @@ p1 <- ggplot(data = out[Model == "Gaussian", ],
   theme(legend.position = "none")
 
 tiff(filename = "../tmp/elisa_two_part_gaussian_lo2ratio.tiff",
-     height = 9,
-     width = 7,
+     height = 8,
+     width = 9,
      units = 'in',
      res = 600,
      compression = "lzw+p")
@@ -1554,7 +1589,7 @@ graphics.off()
 p1
 ```
 
-```{r,fig.height=9,fig.width=7}
+```{r,fig.height=8,fig.width=9}
 p1 <- ggplot(data = out[Model == "Gaussian", ],
              aes(x = 2^Estimate,
                  xmin = 2^CILB,
@@ -1563,7 +1598,7 @@ p1 <- ggplot(data = out[Model == "Gaussian", ],
                  fill = Comparisons)) +
   facet_wrap(~ Protein,
              scale = "free_x",
-             ncol = 3) +
+             ncol = 4) +
   geom_errorbarh(height = 0.3) +
   geom_vline(xintercept = 0,
              linetype = "dashed") +
@@ -1575,8 +1610,8 @@ p1 <- ggplot(data = out[Model == "Gaussian", ],
   theme(legend.position = "none")
 
 tiff(filename = "../tmp/elisa_two_part_gaussian_ratio.tiff",
-     height = 9,
-     width = 7,
+     height = 8,
+     width = 9,
      units = 'in',
      res = 600,
      compression = "lzw+p")
@@ -1588,7 +1623,7 @@ p1
 
 ### Average Marginal Effect
 
-```{r,fig.height=9,fig.width=7}
+```{r,fig.height=8,fig.width=9}
 p1 <- ggplot(data = out[Model == "Average Marginal Effect", ],
              aes(x = Estimate,
                  xmin = CILB,
@@ -1597,20 +1632,20 @@ p1 <- ggplot(data = out[Model == "Average Marginal Effect", ],
                  fill = Comparisons)) +
   facet_wrap(~ Protein,
              scale = "free_x",
-             ncol = 3) +
+             ncol = 4) +
   geom_errorbarh(height = 0.3) +
   geom_vline(xintercept = 0,
              linetype = "dashed") +
   geom_point(shape = 21,
-             size = 3) +
-  scale_x_continuous("Ratio of (Concentration [pg/mL] + 1)") +
+             size = 4) +
+  scale_x_continuous("Log10(Concentration [pg/mL] + 1) Difference") +
   ggtitle("Average Marginal Effect") +
   theme_bw() +
   theme(legend.position = "none")
 
 tiff(filename = "../tmp/elisa_two_part_average_marginal_effect.tiff",
-     height = 9,
-     width = 7,
+     height = 8,
+     width = 9,
      units = 'in',
      res = 600,
      compression = "lzw+p")
@@ -1620,29 +1655,29 @@ graphics.off()
 p1
 ```
 
-```{r,fig.height=9,fig.width=7}
+```{r,fig.height=8,fig.width=9}
 p1 <- ggplot(data = out[Model == "Average Marginal Effect", ],
-             aes(x = Estimate,
-                 xmin = CILB,
-                 xmax = CIUB,
+             aes(x = 2^Estimate,
+                 xmin = 2^CILB,
+                 xmax = 2^CIUB,
                  y = Comparisons,
                  fill = Comparisons)) +
   facet_wrap(~ Protein,
              scale = "free_x",
-             ncol = 3) +
+             ncol = 4) +
   geom_errorbarh(height = 0.3) +
-  geom_vline(xintercept = 0,
+  geom_vline(xintercept = 1,
              linetype = "dashed") +
   geom_point(shape = 21,
-             size = 3) +
-  scale_x_continuous("Log10(Concentration [pg/mL] + 1) Difference") +
+             size = 4) +
+  scale_x_continuous("Ratio of (Concentration [pg/mL] + 1)") +
   ggtitle("Average Marginal Effect") +
   theme_bw() +
   theme(legend.position = "none")
 
 tiff(filename = "../tmp/elisa_two_part_average_marginal_effect.tiff",
-     height = 9,
-     width = 7,
+     height = 8,
+     width = 9,
      units = 'in',
      res = 600,
      compression = "lzw+p")

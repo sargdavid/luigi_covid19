@@ -11,18 +11,18 @@ output:
     code_folding: hide
 ---
 
-*Created: 9/6/2023\
-Last update: 03/15/2024*
+Created: 9/6/2023
+Last update: 03/15/2024
 
-# *Background*
+# Background
 
-*Analysis datasets and copy of the Rmd are in Rutgers box:\
-<https://rutgers.app.box.com/folder/227391194192>*
+Analysis data sets and copy of the Rmd are in Rutgers box:
+<https://rutgers.app.box.com/folder/227391194192>
 
-*GitHub Repo:\
-<https://github.com/sargdavid/luigi_covid19>*
+GitHub Repo:
+<https://github.com/sargdavid/luigi_covid19>
 
-# *Setup*
+# Setup
 
 ```{r setup}
 options(scipen=999)
@@ -39,15 +39,15 @@ require(AnnotationDbi)
 require(org.Hs.eg.db)
 ```
 
-# *Data*
+# Data
 
-## *Clinical variables and ELISA*
+## Clinical variables and ELISA
 
 ```{r}
 dt1 <- fread("../Data/luigi_covid19_clinical_data.csv")
 ```
 
-## *Rename DX columns*
+## Rename DX columns
 
 ```{r}
 ndx <- which(colnames(dt1) %in% "Primary DX")
@@ -55,9 +55,9 @@ colnames(dt1)[ndx] <- paste0("diag",
                              1:length(ndx))
 ```
 
-## *Errata*
+## Errata
 
-*Corrected as per Luigi's emails*
+Corrected as per Luigi's emails
 
 ```{r}
 dt1$COPD[dt1$COPD == 2] <- 1
@@ -69,7 +69,7 @@ dt1$`WHO-OSCI DISCHARGE`[dt1$`Real ID` %in% c("457084",
                                               "771982")] <- 8
 ```
 
-## *Add ADPPIV and ACE2 from ELISA*
+## Add ADPPIV and ACE2 from ELISA
 
 ```{r}
 tmp <- fread("../Data/COVID study Master sheet w ELISA data 2_1-24.csv")
@@ -89,16 +89,16 @@ rm(tmp)
 gc()
 ```
 
-# *Endpoints*
+# Endpoints
 
-*In-hospital death (Expired)\
-30-day readmission\
-90-day readmission\
-30-day (out-of hospital?) mortality\
-90-day (out-of hospital?) mortality*
-
-*NOTE: last 4 only have data for non-COVID patients!\
-2 additional patients died within 30days of discharge (is that correct?). I think it is from the discharge because 7215440 was admitted on 3/17/22, discharged on 5/2/22, and died "within 30 days" so cannot be from admission.*
+In-hospital death (Expired)  
+30-day readmission  
+90-day readmission  
+30-day (out-of hospital?) mortality  
+90-day (out-of hospital?) mortality  
+  
+*NOTE*: last 4 only have data for non-COVID patients!  
+2 additional patients died within 30days of discharge (is that correct?). I think it is from the discharge because 7215440 was admitted on 3/17/22, discharged on 5/2/22, and died "within 30 days" so cannot be from admission.
 
 ```{r}
 dt1[dt1$`30 Day Mortality` == 1, ]
@@ -108,8 +108,8 @@ dt1[dt1$`30 Day Mortality` == 1, ]
 dt1[dt1$`90 Day Mortality` == 1, ]
 ```
 
-*NOTE: DX1-40 are for non-COVID patients only.\
-diag1-6 (aka Primary Diagnoses) are for COVID patients only.*
+*NOTE*: DX1-40 are for non-COVID patients only.  
+diag1-6 (aka Primary Diagnoses) are for COVID patients only.  
 
 ```{r}
 dt1[, c("Study Group",
@@ -118,7 +118,7 @@ dt1[, c("Study Group",
         "DX1")]
 ```
 
-### *Create Reason for Admission and DX2*
+### Create Reason for Admission and DX2  
 
 ```{r}
 dt1 <- data.table(`Real ID` = dt1$`Real ID`,
@@ -130,7 +130,7 @@ dt1$Reason_for_Admission[dt1$DX1 == ""] <- dt1$diag1[dt1$DX1 == ""]
 dt1$Reason_for_Admission[dt1$Reason_for_Admission == "#N/A"] <- NA
 ```
 
-### *Fix Reason for Admission*
+### Fix Reason for Admission
 
 ```{r}
 dt1$Reason_for_Admission[dt1$`Study Group` == "COVID" & 
@@ -145,14 +145,14 @@ dt1$Reason_for_Admission[dt1$Reason_for_Admission == "Altered Mental Status/R41.
 dt1$Reason_for_Admission[dt1$Reason_for_Admission == "N/A" ] <- NA
 ```
 
-### *DX2*
+### DX2
 
 ```{r}
 dt1$Adm_DX2[dt1$DX1 == ""] <- dt1$diag2[dt1$DX1 == ""]
 dt1$Adm_DX2[dt1$DX2 == "#N/A"] <- NA
 ```
 
-### *Save DX1*
+### Save DX1
 
 ```{r}
 diags <- dt1[, .(N = .N),
@@ -173,7 +173,7 @@ write.csv(diags,
 diags
 ```
 
-## *Reason for admission*
+## Reason for admission
 
 ```{r}
 rfa <- fread("../Data/diags_01142024.csv")
@@ -186,7 +186,7 @@ save(rfa,
      file = "../Data/rfa.RData")
 ```
 
-### *Delete DX columns*
+### Delete DX columns
 
 ```{r}
 dt1$diag1 <- NULL
@@ -200,7 +200,7 @@ dt1 <- data.table(dt1[, `Real ID`:`TNF beta`],
                   dt1[, `DPPIV (pg/ml)`:`ACE2 (ng/ml)`])
 ```
 
-### *Format clinical variables*
+### Format clinical variables
 
 ```{r}
 dt1$`Real ID` <- as.character(dt1$`Real ID`)
@@ -376,7 +376,7 @@ dt1$`DPPIV (pg/ml)` <- as.numeric(as.character(dt1$`DPPIV (pg/ml)`))
 dt1$`ACE2 (ng/ml)` <- as.numeric(as.character(dt1$`ACE2 (ng/ml)`))
 ```
 
-### *Rearrange Columns*
+### Rearrange Columns
 
 ```{r}
 dt1 <- data.table(dt1[, `Real ID`:`LOS`],
@@ -384,17 +384,17 @@ dt1 <- data.table(dt1[, `Real ID`:`LOS`],
                   dt1[, `Expired`:`ACE2 (ng/ml)`])
 ```
 
-### *Summary clinical and ELISA*
+### Summary clinical and ELISA
 
 ```{r}
 summary(dt1)
 ```
 
-## *Gene expressions*
+## Gene expressions
 
-*NOTE: data contains both, coding and non-coding genes.*
+*NOTE*: data contains both, coding and non-coding genes.
 
-### *First RNA-seq file*
+### First RNA-seq file
 
 ```{r}
 dt2 <- fread("../Data/gene_count.xls")
@@ -409,7 +409,7 @@ rnaseq_meta1 <- data.table(sample_names = colnames(dt2)[2:58],
 rnaseq_meta1
 ```
 
-### *Second RNA-seq file*
+### Second RNA-seq file
 
 ```{r}
 dt3 <- fread("../Data/gene_count_Additional.txt")
@@ -422,7 +422,7 @@ rnaseq_meta2 <- data.table(sample_names = names(dt3)[2:46],
 rnaseq_meta2
 ```
 
-### *Merge RNA-seq meta files*
+### Merge RNA-seq meta files
 
 ```{r}
 rnaseq_meta <- rbindlist(list(rnaseq_meta1,
@@ -433,9 +433,9 @@ length(unique(rnaseq_meta$`Real ID`))
 rnaseq_meta$rnaseq_cohort <- NULL
 ```
 
-### *Merge RNA-seq files*
+### Merge RNA-seq files
 
-*First 10 columns are gene info, the other 102 columns are the samples.*
+First 10 columns are gene info, the other 102 columns are the samples.  
 
 ```{r}
 dt_rna <- merge(dt2,
@@ -452,7 +452,7 @@ dt_rna <- merge(dt2,
                        "tf_family"))
 ```
 
-## *Duplicated gene names*
+## Duplicated gene names
 
 ```{r}
 dup <- dt_rna[gene_name %in% gene_name[duplicated(gene_name) == TRUE], ]
@@ -472,7 +472,7 @@ length(dup_genes)
 dup_genes[1:10]
 ```
 
-### *Add counts for the same genes*
+### Add counts for the same genes
 
 ```{r}
 out <- list()
@@ -490,7 +490,7 @@ out <- do.call("rbind",
 out
 ```
 
-### *Delete duplicates and replace them with aggregated counts for those genes*
+### Delete duplicates and replace them with aggregated counts for those genes
 
 ```{r}
 dt_rna <- dt_rna[!(gene_name %in% dup_genes), ]
@@ -502,16 +502,16 @@ length(unique(dt_rna$gene_name))
 nrow(dt_rna)
 ```
 
-### *IDs that are in RNA-seq but not in Clinical*
+### IDs that are in RNA-seq but not in Clinical
 
-*11 IDs*
+11 IDs  
 
 ```{r}
 id_no_clin <- rnaseq_meta$`Real ID`[!(rnaseq_meta$`Real ID` %in% dt1$`Real ID`)]
 id_no_clin
 ```
 
-### *Patient "7215440" has 2 RNA-seq samples. We will use the 2nd one "7215440b" and discard the 1st one "7215440a"*
+### Patient "7215440" has 2 RNA-seq samples. We will use the 2nd one "7215440b" and discard the 1st one "7215440a"
 
 ```{r}
 dt1[`Real ID` %in% c("7215440",
@@ -522,24 +522,24 @@ rnaseq_meta$`Real ID`[rnaseq_meta$`Real ID` == "7215440b"] <- "7215440"
 rnaseq_meta$`Real ID`[!(rnaseq_meta$`Real ID` %in% dt1$`Real ID`)]
 ```
 
-### *IDs that are in Clinical but not in RNA-seq*
+### IDs that are in Clinical but not in RNA-seq
 
-*91 IDs*
+91 IDs
 
 ```{r}
 id_no_rna <- dt1$`Real ID`[!(dt1$`Real ID` %in% rnaseq_meta$`Real ID`)]
 id_no_rna 
 ```
 
-### *Add Entrez ID*
+### Add Entrez ID
 
-*Source: <https://github.com/KongLabRUSP/mes13/blob/731b35f3de3ffde4e42d5045fb5fcdf3dfc97d72/mes13_fx_report_v1.Rmd#L589>*
+Source: <https://github.com/KongLabRUSP/mes13/blob/731b35f3de3ffde4e42d5045fb5fcdf3dfc97d72/mes13_fx_report_v1.Rmd#L589>  
+  
+See also: 
 
-*See also:*
+[https://stackoverflow.com/questions/71131883/r-how-do-i-convert-gene-symbols-to-entrez-ids](https://stackoverflow.com/questions/71131883/r-how-do-i-convert-gene-symbols-to-entrez-ids){.uri}
 
-[*https://stackoverflow.com/questions/71131883/r-how-do-i-convert-gene-symbols-to-entrez-ids*](https://stackoverflow.com/questions/71131883/r-how-do-i-convert-gene-symbols-to-entrez-ids){.uri}
-
-*NOTE: ReactomPA tutorial recommend using clusterProfiler::bitr() for Entraz ID mapping (Section 9.1 of <https://yulab-smu.top/biomedical-knowledge-mining-book/reactomepa.html>). But we used AnnotationDbi::mapIds function, with "org.Hs.eg.db" database - a genome wide annotation of Human.*
+*NOTE*: ReactomPA tutorial recommend using clusterProfiler::bitr() for Entraz ID mapping (Section 9.1 of <https://yulab-smu.top/biomedical-knowledge-mining-book/reactomepa.html>). But we used AnnotationDbi::mapIds function, with "org.Hs.eg.db" database - a genome wide annotation of Human.  
 
 ```{r}
 entrez_id <- AnnotationDbi::mapIds(org.Hs.eg.db,
@@ -551,7 +551,7 @@ entrez_id <- data.table(gene_name = names(entrez_id),
 head(entrez_id)
 ```
 
-#### *Merge Entrez IDs with RNA-seq data*
+#### Merge Entrez IDs with RNA-seq data* 
 
 ```{r}
 dt_rna <- merge(entrez_id,
@@ -560,7 +560,7 @@ dt_rna <- merge(entrez_id,
                 all.y = TRUE)
 ```
 
-#### *Genes missing Entrez ID*
+#### Genes missing Entrez ID
 
 ```{r}
 tmp <- dt_rna[is.na(entrez_id), 
@@ -591,13 +591,13 @@ rm(tbl2.2)
 tbl2
 ```
 
-### *lncRNA database from John Johnson (NOT USED YET)*
+### lncRNA database from John Johnson (NOT USED YET)
 
 ```{r}
 # dt_lnc_john <- fread("../Data/lncipedia_transcript_type.lncRNA")
 ```
 
-## *Save data*
+## Save data
 
 ```{r}
 save(dt1,
@@ -610,14 +610,14 @@ save(rnaseq_meta,
      file = "../Data/rnaseq_meta.RData")
 ```
 
-## *Clean*
+## Clean
 
 ```{r}
 rm(list = ls())
 gc()
 ```
 
-# *Session*
+# Session
 
 ```{r}
 sessionInfo()
