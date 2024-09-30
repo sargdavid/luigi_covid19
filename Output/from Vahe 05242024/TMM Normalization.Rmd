@@ -1,0 +1,67 @@
+---
+title: "TMM Normalization"
+output: html_notebook
+---
+
+https://genomebiology.biomedcentral.com/articles/10.1186/gb-2010-11-3-r25
+
+```{r}
+library(edgeR)
+library(ggplot2)
+library(reshape2)
+
+
+ndx <- which(colnames(dt_rna_cod) %in% rnaseq_meta_clin$sample_names)
+tmp <- as.matrix(dt_rna_cod[, ndx, with = FALSE])
+rownames(tmp) <- dt_rna_cod$gene_id
+
+counts <- tmp
+colData <- rnaseq_meta_clin
+
+# Step 1: Create DGEList object and calculate TMM normalization factors
+dge <- DGEList(counts = counts,group = colData$Cohort)
+dge <- calcNormFactors(dge, method = "TMM")
+norm_counts <- cpm(dge, normalized.lib.sizes = TRUE)
+
+# Step 2: Estimate dispersion, fit the GLM, and perform LRT
+dge <- DGEList(counts = counts, group = colData$Cohort)
+dge <- calcNormFactors(dge, method = "TMM")
+design <- model.matrix(~ colData$Cohort)
+dge <- estimateDisp(dge, design)
+fit <- glmFit(dge, design)
+lrt <- glmLRT(fit)
+
+# Step 3: Extract and filter DE genes
+top_genes <- topTags(lrt, n = 50)$table
+filtered_genes <- top_genes[
+  abs(top_genes$logFC) > 1 & 
+  top_genes$PValue < 0.05 & 
+  top_genes$FDR < 0.1, 
+]
+round(filtered_genes, 6)
+filtered_gene_ids <- rownames(filtered_genes)
+
+# Step 4: Extract normalized counts for filtered genes
+norm_counts_filtered <- norm_counts[filtered_gene_ids, ]
+
+# Convert to long format for ggplot2
+norm_counts_df <- as.data.frame(norm_counts_filtered)
+norm_counts_df$gene <- rownames(norm_counts_df)
+norm_counts_long <- melt(norm_counts_df, id.vars = "gene")
+
+# Add sample information to the long format data
+norm_counts_long <- merge(norm_counts_long, colData, by.x = "variable", by.y = "sample_names")
+
+# Step 5: Create box plots for each gene
+ggplot(norm_counts_long, aes(x = factor(Cohort), y = value, fill = factor(AnyDM))) +
+  geom_boxplot() +
+  facet_wrap(~ gene, scales = "free_y") +
+  labs(title = "Expression of Filtered Genes",
+       y = "Normalized Counts",
+       x = "Cohort") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+

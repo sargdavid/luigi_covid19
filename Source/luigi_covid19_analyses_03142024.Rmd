@@ -11,16 +11,23 @@ output:
     code_folding: hide
 ---
 
-Created: 9/6/2023\
-Last update: 3/15/2024
+Created: 9/6/2023
+Last update: 8/26/2024
 
 # Background
 
-Analysis datasets and copy of the Rmd are in Rutgers box:\
+Analysis data sets and copy of the Rmd are in Rutgers box:\
 <https://rutgers.app.box.com/folder/227391194192>
 
 GitHub Repo:\
 <https://github.com/sargdavid/luigi_covid19>
+
+**Meeting 4/18/2024:**
+
+1.  Add p-values to tables
+2.  Make WHO OSCI plots. See Lu's and Marshall's examples.
+3.  Note: ACE2 inhibitor is an entry point. Check for significant differences in DPPIV and ACE2.
+4.  Add average estimates forest plots for ELISA.
 
 **Meeting 3/14/2024:**
 
@@ -32,7 +39,7 @@ GitHub Repo:\
 **ToDo-s:**
 
 1.  Explore why DM prevents INFa and IL-10 increase in COVID patients (i.e., why concentrations of these proteins is high COVID/No DM but not in COVID/DM).
-2.  What are the profiles of pritein-non-producing patients?
+2.  What are the profiles of protein-non-producing patients?
 3.  Use Log2 in ELISA so the differences are 2-fold changes.
 4.  On forest plots, show ratios, not log-ratios.
 5.  Transform the data using quantile or Fisher-Yates normalization (`DNAMR::cnormalize`)
@@ -79,7 +86,7 @@ GitHub Repo:\
 2.  In COVID, coagulation cascade pathway was affected. See if we can find it in clin. data, ELIZA or RNA-seq. Should coagulation be considered in COVID patients' treatment?
 3.  Coding/non-coding gene co-expression.
 4.  Activation of inflammatory pathways because we have transcriptome, not just genome.
-5.  Neanderthals' genes (see Lu's email).
+5.  Neanderthals' genes (see Lu's email). <https://genome.ucsc.edu/Neandertal/>
 6.  Important factors: Critical care, WHO OSCI, LOS, ACE inhibitors, age\>55, HTN, DM.
 
 # Setup
@@ -90,6 +97,7 @@ options(scipen = 999)
 # if (!require("BiocManager",
 #              quietly = TRUE))
 # install.packages("BiocManager")
+# BiocManager::install("DESeq2")
 # BiocManager::install("ReactomePA")
 
 require(data.table)
@@ -210,7 +218,7 @@ load("../Data/rfa.RData")
 
 # Clinical Data
 
-## Table 1
+## Summary
 
 ```{r}
 t1 <- table1( ~.| `Study Group` + AnyDM,
@@ -218,7 +226,8 @@ t1 <- table1( ~.| `Study Group` + AnyDM,
                               "Reason_for_Admission",
                               "Adm_DX2",
                               "Admit Date",
-                              "Discharge Date")])
+                              "Discharge Date")],
+              na.rm = TRUE)
 
 t1
 ```
@@ -231,6 +240,365 @@ write.table (t1 ,
              # append = TRUE,
              sep = ',')
 ```
+
+## Tables
+
+### Table functions
+
+```{r}
+foo1 <- function(a = tmp2$`Inpatient=1, ER=2, OP=3`,
+                 b = tmp2$`Study Group`,
+                 c = tmp2$AnyDM,
+                 c_name = "") {
+  tmp1 <- data.table(a, b, c)
+  
+  tmp1$d <- paste(tmp1$b,
+                  tmp1$c, 
+                  sep = "/")
+  
+  tmp1$d <- factor(tmp1$d,
+                   levels = c("No COVID/0",
+                              "No COVID/1",
+                              "COVID/0",
+                              "COVID/1"))
+  
+  if(class(tmp1$a) == "factor") {
+    t1 <- tmp1[, .(`No COVID/No DM` = paste0(sum(d == "No COVID/0"),
+                                             " (",
+                                             round(100*sum(d == "No COVID/0")/.N, 1),
+                                             "%)"),
+                   `No COVID/DM` = paste0(sum(d == "No COVID/1"),
+                                          " (",
+                                          round(100*sum(d == "No COVID/1")/.N, 1),
+                                          "%)"),
+                   `COVID/No DM` = paste0(sum(d == "COVID/0"),
+                                          " (",
+                                          round(100*sum(d == "COVID/0")/.N, 1),
+                                          "%)"),
+                   `COVID/DM` = paste0(sum(d == "COVID/1"),
+                                       " (",
+                                       round(100*sum(d == "COVID/1")/.N, 1),
+                                       "%)"),
+                   `p-Value` = round(chisq.test(x = tmp1$a,
+                                                y = tmp1$d)$p.value,
+                                     3)),
+               by = a]
+    t1$`p-Value`[t1$`p-Value` < 0.001] <- "<0.001"
+    t1$`p-Value`[-1] <- ""
+    
+    names(t1)[1] <- ""
+  } else {
+    t1 <- tmp1[, .(c_name,
+                   `No COVID/No DM` = paste0(round(mean(a[d == "No COVID/0"],
+                                                        na.rm = TRUE), 1),
+                                             " (",
+                                             round(sd(a[d == "No COVID/0"],
+                                                      na.rm = TRUE), 1),
+                                             ")"),
+                   `No COVID/DM` = paste0(round(mean(a[d == "No COVID/1"],
+                                                     na.rm = TRUE), 1),
+                                          " (",
+                                          round(sd(a[d == "No COVID/1"],
+                                                   na.rm = TRUE), 1),
+                                          ")"),
+                   `COVID/No DM` = paste0(round(mean(a[d == "COVID/0"],
+                                                     na.rm = TRUE), 1),
+                                          " (",
+                                          round(sd(a[d == "COVID/0"],
+                                                   na.rm = TRUE), 1),
+                                          ")"),
+                   `COVID/DM` = paste0(round(mean(a[d == "COVID/1"],
+                                                  na.rm = TRUE), 1),
+                                       " (",
+                                       round(sd(a[d == "COVID/1"],
+                                                na.rm = TRUE), 1),
+                                       ")"),
+                   `p-Value` = round(summary(lm(a ~ d,
+                                                data = tmp1))$coefficients[2, 4],
+                                     3))]
+    t1$`p-Value`[t1$`p-Value` < 0.001] <- "<0.001"
+  }
+  t1 <- data.table(Variable = c_name,
+                   t1)
+  return(t1)
+}
+
+foo2 <- function(a = tmp2$`Inpatient=1, ER=2, OP=3`,
+                 c = tmp2$AnyDM,
+                 c_name = "") {
+  tmp1 <- data.table(a,  c)
+  
+  if(class(tmp1$a) == "factor") {
+    t1 <- tmp1[, .(`COVID/No DM` = paste0(sum(c == 0),
+                                          " (",
+                                          round(100*sum(c == 0)/.N, 1),
+                                          "%)"),
+                   `COVID/DM` = paste0(sum(c == 1),
+                                       " (",
+                                       round(100*sum(c == 1)/.N, 1),
+                                       "%)"),
+                   `p-Value` = round(chisq.test(x = tmp1$a,
+                                                y = tmp1$c)$p.value,
+                                     3)),
+               by = a]
+    t1$`p-Value`[t1$`p-Value` < 0.001] <- "<0.001"
+    t1$`p-Value`[-1] <- ""
+    
+    names(t1)[1] <- ""
+  } else {
+    t1 <- tmp1[, .(c_name,
+                   `COVID/No DM` = paste0(round(mean(a[c == 0],
+                                                     na.rm = TRUE), 1),
+                                          " (",
+                                          round(sd(a[c == 0],
+                                                   na.rm = TRUE), 1),
+                                          ")"),
+                   `COVID/DM` = paste0(round(mean(a[c == 1],
+                                                  na.rm = TRUE), 1),
+                                       " (",
+                                       round(sd(a[c == 1],
+                                                na.rm = TRUE), 1),
+                                       ")"),
+                   `p-Value` = round(summary(lm(a ~ c,
+                                                data = tmp1))$coefficients[2, 4],
+                                     3))]
+    t1$`p-Value`[t1$`p-Value` < 0.001] <- "<0.001"
+  }
+  t1 <- data.table(Variable = c_name,
+                   t1)
+  return(t1)
+}
+```
+
+### Table 1: 
+
+Subject demographic and clinical characteristics stratified by the presence and absence of diabetes and COVID-19.
+
+```{r}
+tmp2 <- dt1[, c("Study Group",
+                "AnyDM",
+                "Inpatient=1, ER=2, OP=3",
+                "Age",
+                "Sex",
+                "Race",
+                "Weight (kg)",
+                "BMI",
+                "Obese",
+                "If BMI ?30 Obesity Class (I,II,III)",
+                # "Smoking History (0,1,2)",
+                "CCI",
+                "MI",
+                "HF",
+                "PVD",
+                "CVD",
+                "Dementia",
+                "COPD",
+                "Rheum/ CONNECTIVE TISSUE DISEASE",   
+                "PUD",
+                "mliverd",
+                "Hemoplegia",
+                "RenalD",
+                "Cancer",
+                "msliver",
+                "MetaCancer",
+                "AIDS",
+                "HTN",
+                "Hyperlipidemia",
+                "# Metabolic Syndrome Criteria")]
+
+out <- list()
+for(i in 3:ncol(tmp2)) {
+  out[[i - 2]] <- foo1(a = tmp2[[i]],
+                       c_name = colnames(tmp2)[i])
+}
+```
+
+```{r}
+t1 <- rbindlist(out)
+write.csv(t1,
+          file = "../tmp/table1.csv")
+t1
+```
+
+### Table 2:
+
+Available patient clinical laboratory values upon hospital presentation.
+
+```{r}
+tmp2 <- dt1[, c("Study Group",
+                "AnyDM",
+                "HbA1c",
+                "Vit_D_level",
+                "ALT",
+                "AST",
+                "hs-CRP",
+                "CRP",
+                "Fibrinogen",
+                "D-Dimer",
+                "ESR",
+                "Ferritin",
+                "LDH",
+                "Lactic Acid",
+                "PCT",
+                "Glucose Lvl",
+                "Screat")]
+
+out2 <- list()
+for(i in 3:ncol(tmp2)) {
+  out2[[i - 2]] <- foo1(a = tmp2[[i]],
+                        c_name = colnames(tmp2)[i])
+}
+```
+
+```{r}
+t2 <- rbindlist(out2)
+write.csv(t2,
+          file = "../tmp/table2.csv")
+t2
+```
+
+### Table 3:
+
+Comparison of medication usage between patient with and without COVID-19 and diabetes
+
+```{r}
+tmp2 <- dt1[, c("Study Group",
+                "AnyDM",
+                "tocilizumab",
+                "remdesivir",
+                "dexamethasone",
+                "methylprednisolone",
+                "prednisone",
+                "hydrocortisone",
+                "azithromycin",
+                "hydroxychloroquine",
+                # "regeneron", # only 2 patients
+                "ACEis",
+                "ARBs",
+                "ARNIs",
+                "Insulin",
+                "Metformin",
+                "Glimepiride",
+                "Glipizide",
+                "Sitagliptin",
+                "Full Dose Anticoagulation",
+                "Prophylactic Anticoagulation")]
+
+out3 <- list()
+for(i in 3:ncol(tmp2)) {
+  out3[[i - 2]] <- foo1(a = tmp2[[i]],
+                        c_name = colnames(tmp2)[i])
+}
+```
+
+```{r}
+t3 <- rbindlist(out3)
+write.csv(t3,
+          file = "../tmp/table3.csv")
+t3
+```
+
+### Table 4:
+
+Patient hospital disposition after admission
+
+```{r}
+tmp2 <- dt1[, c("Study Group",
+                "AnyDM",
+                "Critical Care",
+                "ICU LOS",
+                "LOS",
+                # "Still_In_Hospital_08182023",
+                "Expired")]
+
+out4 <- list()
+for(i in 3:ncol(tmp2)) {
+  out4[[i - 2]] <- foo1(a = tmp2[[i]],
+                        c_name = colnames(tmp2)[i])
+}
+```
+
+```{r}
+t4 <- rbindlist(out4)
+write.csv(t4,
+          file = "../tmp/table4.csv")
+t4
+```
+
+### Table 5:
+
+Comparison of disease progression with the WHO Ordinal Scale for Clinical Severity
+
+```{r}
+tmp2 <- droplevels(dt1[`Study Group` == "COVID",
+                       c("AnyDM",
+                         "WHO-OSCI D1",
+                         "WHO-OSCI D3",
+                         "WHO-OSCI D7",
+                         "WHO-OSCI D14",
+                         "WHO-OSCI D21",
+                         "WHO-OSCI D28",
+                         "WHO-OSCI DISCHARGE")])
+
+out5 <- list()
+for(i in 2:ncol(tmp2)) {
+  out5[[i - 1]] <- foo2(a = tmp2[[i]],
+                        c_name = colnames(tmp2)[i])
+}
+```
+
+```{r}
+t5 <- rbindlist(out5)
+write.csv(t5,
+          file = "../tmp/table5.csv")
+t5
+```
+
+### Table 6:
+
+Plasma inflammatory cytokine and chemokine comparison between subjects with and without COVID-19 and diabetes mellitus
+
+```{r}
+tmp2 <- dt1[, c("Study Group",
+                "AnyDM",
+                "G-CSF (CSF-3)",
+                "GM-CSF",
+                "IFN alpha",
+                "IFN gamma",
+                "IL-1 beta",
+                "IL-2",
+                "IL-4",
+                "IL-5",
+                "IL-6",
+                "IL-8 (CXCL8)",
+                "IL-10",
+                "IL-12p70",
+                "IL-13",
+                "IL-17A (CTLA-8)",
+                "IL-18",
+                "IP-10 (CXCL10)",
+                "MCP-1 (CCL2)",
+                "MIP-1 alpha (CCL3)",
+                "MIP-1 beta (CCL4)",
+                "TNF alpha",
+                "TNF beta",
+                "DPPIV (pg/ml)",
+                "ACE2 (ng/ml)")]
+
+out6 <- list()
+for(i in 3:ncol(tmp2)) {
+  out6[[i - 2]] <- foo1(a = log10(tmp2[[i]] + 1),
+                        c_name = colnames(tmp2)[i])
+}
+```
+
+```{r}
+t6 <- rbindlist(out6)
+write.csv(t6,
+          file = "../tmp/table6.csv")
+t6
+```
+
 
 ## DX1 Analysis
 
@@ -248,54 +616,54 @@ level1_n
 
 ```{r}
 tmp1 <- rfa[Expired == 1,
-           c("Real ID",
-             "Study Group",
-             "Reason_for_Admission",
-             "Age",
-             "Race",
-             "Level1",
-             "Level2",
-             "Level3",
-             "Level4",
-             "Level5",
-             "Level6",
-             "Level7")]
+            c("Real ID",
+              "Study Group",
+              "Reason_for_Admission",
+              "Age",
+              "Race",
+              "Level1",
+              "Level2",
+              "Level3",
+              "Level4",
+              "Level5",
+              "Level6",
+              "Level7")]
 ```
 
 ### 90-Day after discharge death DX1
 
 ```{r}
 tmp2 <- rfa[rfa$`90 Day Mortality` == 1,
-           c("Real ID",
-             "Study Group",
-             "Reason_for_Admission",
-             "Age",
-             "Race",
-             "Level1",
-             "Level2",
-             "Level3",
-             "Level4",
-             "Level5",
-             "Level6",
-             "Level7")]
+            c("Real ID",
+              "Study Group",
+              "Reason_for_Admission",
+              "Age",
+              "Race",
+              "Level1",
+              "Level2",
+              "Level3",
+              "Level4",
+              "Level5",
+              "Level6",
+              "Level7")]
 ```
 
 ### 90-Day after discharge readmission DX1
 
 ```{r}
 tmp3 <- rfa[rfa$`90 Day Readmission`== 1,
-           c("Real ID",
-             "Study Group",
-             "Reason_for_Admission",
-             "Age",
-             "Race",
-             "Level1",
-             "Level2",
-             "Level3",
-             "Level4",
-             "Level5",
-             "Level6",
-             "Level7")]
+            c("Real ID",
+              "Study Group",
+              "Reason_for_Admission",
+              "Age",
+              "Race",
+              "Level1",
+              "Level2",
+              "Level3",
+              "Level4",
+              "Level5",
+              "Level6",
+              "Level7")]
 ```
 
 ```{r}
@@ -577,13 +945,13 @@ summary(m8)
 ## WHO-OSCI
 
 ### Desease severity at baseline by WHO-OSCI
-
-if \<5 = mild\
-if \>= 5 = severe\
-5 = very sick\
-6 = intubated\
-7 = ventilated\
-if 8: dead
+World Health Organization Ordinal Scale for Clinical Severity
+<5 = mild
+>= 5 = severe
+5 = very sick
+6 = intubated
+7 = ventilated
+8 = dead
 
 ```{r}
 covid$who_osci_d1_cat <- "Dead"
@@ -602,39 +970,125 @@ addmargins(table("WHO-OSCI D1" = dt1$`WHO-OSCI D1`,
 ```
 
 ### WHO-OSCI over time
-
+Source: https://stackoverflow.com/questions/10834382/keep-unused-levels-in-bar-plot  
+Source: https://stackoverflow.com/questions/3472980/how-to-change-facet-labels 
+  
 ```{r}
-tmp <- dt1[, c("Real ID",
-               "Study Group",
-               "AnyDM",
-               "Expired",
-               "WHO-OSCI D1",
-               "WHO-OSCI D3",
-               "WHO-OSCI D7",
-               "WHO-OSCI D14",
-               "WHO-OSCI D21",
-               "WHO-OSCI D28",
-               "WHO-OSCI DISCHARGE")]
+tmp <- dt1[`Study Group` == "COVID",
+           c("Real ID",
+             "AnyDM",
+             "Expired",
+             "WHO-OSCI D1",
+             "WHO-OSCI D3",
+             "WHO-OSCI D7",
+             "WHO-OSCI D14",
+             "WHO-OSCI D21",
+             "WHO-OSCI D28",
+             "WHO-OSCI DISCHARGE")]
 
-tmp <- melt.data.table(tmp,
-                       id.vars = c(1:4),
-                       variable.name = "Day",
-                       value.name = "WHO_OSCI")
-tmp$Day <- factor(tmp$Day,
-                  levels = unique(tmp$Day))
+tmp1 <- melt.data.table(tmp,
+                        id.vars = c(1:3),
+                        variable.name = "Day",
+                        value.name = "WHO_OSCI")
+tmp1$Day <- factor(tmp1$Day,
+                   levels = unique(tmp1$Day))
 
-tmp <- tmp[!is.na(tmp$WHO_OSCI), ]
-ggplot(tmp,
-       aes(x = Day,
-           y = WHO_OSCI,
-           group = `Real ID`,
-           color = `Real ID`)) +
-  facet_wrap(~ AnyDM) +
-  geom_line(position = position_dodge(0.3)) +
+tmp1 <- tmp1[!is.na(tmp1$WHO_OSCI), ]
+
+table(tmp1$Day,
+      tmp1$WHO_OSCI)
+
+tmp2 <- tmp1[, .(N = .N),
+             by = list(AnyDM,
+                       Day,
+                       WHO_OSCI)]
+
+tmp2 <- dcast.data.table(tmp2,
+                         Day + AnyDM ~ WHO_OSCI,
+                         value.var = "N")
+
+tmp2 <- melt.data.table(tmp2,
+                        id.vars = 1:2,
+                        measure.vars = 3:11,
+                        variable.name = "WHO_OSCI",
+                        value.name = "N")
+```
+
+#### By WHO OSCI 
+
+```{r, fig.width=6,fig.height=6}
+p1 <- ggplot(tmp2,
+             aes(x = WHO_OSCI,
+                 y = N,
+                 group = Day,
+                 fill = Day)) +
+  facet_wrap(~ AnyDM,
+             ncol = 1,
+             scale = "free_y",
+             labeller = as_labeller(c("0" = "No DM",
+                                      "1" = "DM"))) +
+  geom_vline(xintercept = 0:8 + 0.5,
+             linetype = "dashed") +
+  geom_bar(position = "dodge",
+           color = "black",
+           stat = "identity") +
+  scale_x_discrete("WHO OSCI") +
+  scale_fill_discrete(breaks = levels(tmp2$Day),
+                      labels = gsub(x = levels(tmp2$Day),
+                                    pattern = "WHO-OSCI ",
+                                    replacement = "")) +
   theme_bw() +
-  theme(legend.position = "none") +
-  theme(axis.text.x = element_text(angle = 45,
-                                   hjust = 1))
+  theme(legend.position = "bottom")
+
+tiff(filename = "../tmp/day_over_who_osci.tiff",
+     height = 6,
+     width = 6,
+     units = 'in',
+     res = 600,
+     compression = "lzw+p",)
+print(p1)
+graphics.off()
+
+p1
+```
+
+#### By Day
+
+```{r, fig.width=6,fig.height=6}
+p2 <- ggplot(tmp2,
+             aes(x = Day,
+                 y = N,
+                 group = WHO_OSCI,
+                 fill = WHO_OSCI)) +
+  facet_wrap(~ AnyDM,
+             ncol = 1,
+             scale = "free_y",
+             labeller = as_labeller(c("0" = "No DM",
+                                      "1" = "DM"))) +
+  geom_vline(xintercept = 0:8 + 0.5,
+             linetype = "dashed") +
+  geom_bar(position = "dodge",
+           color = "black",
+           stat = "identity") +
+  scale_x_discrete("Day",
+                   breaks = levels(tmp2$Day),
+                      labels = gsub(x = levels(tmp2$Day),
+                                    pattern = "WHO-OSCI ",
+                                    replacement = "")) +
+  scale_fill_discrete("WHO OSCI") +
+  theme_bw() +
+  theme(legend.position = "bottom")
+
+tiff(filename = "../tmp/who_osci_over_time.tiff",
+     height = 6,
+     width = 6,
+     units = 'in',
+     res = 600,
+     compression = "lzw+p",)
+print(p2)
+graphics.off()
+
+p2
 ```
 
 ```{r}
@@ -642,19 +1096,19 @@ table(dt1$`WHO-OSCI D1`,
       dt1$Expired)
 ```
 
-### Table 2
+### Table 7: WHO OSCI of Expired by Day
 
 ```{r}
-t2 <- dcast.data.table(`Real ID` ~ Day,
-                       value.var = "WHO_OSCI",
-                       data = tmp[Expired == "Yes", ])
+t2 <- tmp[Expired == "Yes", ]
 
 write.csv(t2,
-          file = "tmp/table2.csv",
+          file = "../tmp/table7.csv",
           row.names = FALSE)
 
 t2
 ```
+
+### LOS
 
 ```{r}
 dt1[,
@@ -686,6 +1140,42 @@ dt1[LOS > 1,
 
 ```{r}
 dt1$LOS[dt1$`Real ID` == 771982]
+```
+
+## DDIP
+
+```{r}
+tt <- dt1[!is.na(`DPPIV (pg/ml)`), ]
+
+hist(tt$`DPPIV (pg/ml)`, 20)
+summary(tt$`DPPIV (pg/ml)`)
+wilcox.test(tt$`DPPIV (pg/ml)` ~ tt$`Study Group`)
+
+hist(log10(tt$`DPPIV (pg/ml)`[tt$`Study Group` == "No COVID"]),
+     20,
+     lims = range(tt$`DPPIV (pg/ml)`))
+hist(log10(tt$`DPPIV (pg/ml)`[tt$`Study Group` == "COVID"]),
+     20,
+     lims = range(tt$`DPPIV (pg/ml)`))
+t.test(log10(tt$`DPPIV (pg/ml)`) ~ tt$`Study Group`)
+```
+
+## ACE2
+
+```{r}
+tt <- dt1[!is.na(`ACE2 (ng/ml)`), ]
+
+hist(tt$`ACE2 (ng/ml)`, 20)
+summary(tt$`ACE2 (ng/ml)`)
+wilcox.test(tt$`ACE2 (ng/ml)` ~ tt$`Study Group`)
+
+hist(log10(tt$`ACE2 (ng/ml)`[tt$`Study Group` == "No COVID"]),
+     20,
+     lims = range(tt$`ACE2 (ng/ml)`))
+hist(log10(tt$`ACE2 (ng/ml)`[tt$`Study Group` == "COVID"]),
+     20,
+     lims = range(tt$`ACE2 (ng/ml)`))
+t.test(log10(tt$`ACE2 (ng/ml)`) ~ tt$`Study Group`)
 ```
 
 # ELISA
@@ -798,8 +1288,8 @@ p1
 ### Histogram
 
 ```{r,fig.height=10,fig.width=10}
-ggplot(dt_elisa_l,
-       aes(x = Log2Conc)) +
+p1 <- ggplot(dt_elisa_l,
+             aes(x = Log2Conc)) +
   facet_wrap(~ Protein,
              scale = "free") +
   geom_histogram(bins = 30) +
@@ -909,7 +1399,7 @@ m1 <- dt_elisa_l[, .(models = list(try(tpm(formula_part1 = Log2Conc ~ grp,
                                            link_part1 = "logit",
                                            family_part2 = gaussian(link = "identity"),
                                            data = data.table(Log2Conc = Log2Conc,
-                                                         grp = grp))))),
+                                                             grp = grp))))),
                  by = Protein]
 ```
 
@@ -958,7 +1448,7 @@ out <- lapply(m1$models,
                                             Comparisons = c("COVID/No DM - No COVID/No DM",
                                                             "No COVID/DM - No COVID/No DM",
                                                             "COVID/DM - No COVID/No DM"),
-                                            Estimated = "Log10(Concentration [pg/mL] + 1) Difference",
+                                            Estimated = "Log2(Concentration [pg/mL] + 1) Difference",
                                             Estimate = s1$Secondpart.model$coefficients[-1, 1],
                                             CILB = s1$Secondpart.model$coefficients[-1, 1] - 
                                               1.96*s1$Secondpart.model$coefficients[-1, 2],
@@ -969,7 +1459,7 @@ out <- lapply(m1$models,
                                             Comparisons = c("COVID/No DM - No COVID/No DM",
                                                             "No COVID/DM - No COVID/No DM",
                                                             "COVID/DM - No COVID/No DM"),
-                                            Estimated = "Log10(Concentration [pg/mL] + 1) Difference",
+                                            Estimated = "Log2(Concentration [pg/mL] + 1) Difference",
                                             Estimate = est_ame$dydx,
                                             CILB = est_ame$CI.L,
                                             CIUB = est_ame$CI.U,
@@ -1047,12 +1537,44 @@ p1 <- ggplot(data = out[Model == "Gaussian", ],
              linetype = "dashed") +
   geom_point(shape = 21,
              size = 3) +
-  scale_x_continuous("Log10(Concentration [pg/mL] + 1) Difference") +
+  scale_x_continuous("Log2(Concentration [pg/mL] + 1) Difference") +
   ggtitle("Gaussian Part of the Model") +
   theme_bw() +
   theme(legend.position = "none")
 
-tiff(filename = "../tmp/elisa_two_part_gaussian.tiff",
+tiff(filename = "../tmp/elisa_two_part_gaussian_lo2ratio.tiff",
+     height = 9,
+     width = 7,
+     units = 'in',
+     res = 600,
+     compression = "lzw+p")
+print(p1)
+graphics.off()
+
+p1
+```
+
+```{r,fig.height=9,fig.width=7}
+p1 <- ggplot(data = out[Model == "Gaussian", ],
+             aes(x = 2^Estimate,
+                 xmin = 2^CILB,
+                 xmax = 2^CIUB,
+                 y = Comparisons,
+                 fill = Comparisons)) +
+  facet_wrap(~ Protein,
+             scale = "free_x",
+             ncol = 3) +
+  geom_errorbarh(height = 0.3) +
+  geom_vline(xintercept = 0,
+             linetype = "dashed") +
+  geom_point(shape = 21,
+             size = 3) +
+  scale_x_continuous("Ratio of (Concentration [pg/mL] + 1)") +
+  ggtitle("Gaussian Part of the Model") +
+  theme_bw() +
+  theme(legend.position = "none")
+
+tiff(filename = "../tmp/elisa_two_part_gaussian_ratio.tiff",
      height = 9,
      width = 7,
      units = 'in',
@@ -1065,6 +1587,38 @@ p1
 ```
 
 ### Average Marginal Effect
+
+```{r,fig.height=9,fig.width=7}
+p1 <- ggplot(data = out[Model == "Average Marginal Effect", ],
+             aes(x = Estimate,
+                 xmin = CILB,
+                 xmax = CIUB,
+                 y = Comparisons,
+                 fill = Comparisons)) +
+  facet_wrap(~ Protein,
+             scale = "free_x",
+             ncol = 3) +
+  geom_errorbarh(height = 0.3) +
+  geom_vline(xintercept = 0,
+             linetype = "dashed") +
+  geom_point(shape = 21,
+             size = 3) +
+  scale_x_continuous("Ratio of (Concentration [pg/mL] + 1)") +
+  ggtitle("Average Marginal Effect") +
+  theme_bw() +
+  theme(legend.position = "none")
+
+tiff(filename = "../tmp/elisa_two_part_average_marginal_effect.tiff",
+     height = 9,
+     width = 7,
+     units = 'in',
+     res = 600,
+     compression = "lzw+p")
+print(p1)
+graphics.off()
+
+p1
+```
 
 ```{r,fig.height=9,fig.width=7}
 p1 <- ggplot(data = out[Model == "Average Marginal Effect", ],
@@ -1458,8 +2012,6 @@ colSums(dt_fpm)[1:5]
 ```
 
 ```{r}
-tmp5
-
 xx <- data.table(fpm = dt_fpm[which(rownames(dt_fpm) == "ENSG00000165949"), ],
                  sample_names = colnames(dt_fpm))
 
@@ -2049,8 +2601,8 @@ dim(tmp)
 rownames(tmp) <- dt_rna_cod$gene_id
 
 dds_dm <- DESeqDataSetFromMatrix(countData = tmp, 
-                                  colData = rnaseq_meta_clin[rnaseq_meta_clin$AnyDM == 1, ],
-                                  design = ~ Cohort)
+                                 colData = rnaseq_meta_clin[rnaseq_meta_clin$AnyDM == 1, ],
+                                 design = ~ Cohort)
 dds_dm
 ```
 
