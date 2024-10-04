@@ -1,0 +1,49 @@
+---
+title: "Data Analysis: Long non-coding RNA co-expression network analysis of genetic and inflammatory signatures associated with worse prognosis in hospitalized patients with severe SARS-CoV-2 infection and diabetes. "
+author: Davit Sargsyan
+output:
+  html_notebook:
+    highlight: tango
+    toc: true
+    toc_float: true
+    toc_depth: 6
+    number_sections: yes
+    code_folding: hide
+---
+
+# Setup
+
+```{r}
+
+```
+
+# Load data
+
+```{r}
+load("../Data/dt1.RData")
+load("../Data/dt_rna.RData")
+load("../Data/rnaseq_meta.RData")
+load("../Data/rfa.RData")
+```
+
+# lncRNAs
+
+Source: https://lncipedia.org/  
+NOTE: ADD OUR PAPER(S) to this website!!!  
+  
+```{r}
+# Previous version, 49,935 genes:
+lncRNA <- fread("../Data/lncipedia_transcript_type.lncRNA")
+head(lncRNA)
+length(unique(lncRNA$gene))
+
+
+# As of 10/4/2024 the website has 56,946 non-coding genes. Update data when possible.
+```
+
+# Separate coding and non-coding genes
+NOTE: check the names!!! Only 3,253 non-coding gene names matched up - too little!
+```{r}
+dt_lncrna <- dt_rna[tolower(gene_name) %in% tolower(lncRNA$gene), ]
+```
+

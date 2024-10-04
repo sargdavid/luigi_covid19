@@ -1,0 +1,3987 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+RPKM: Reads Per Kilobase Million  
+FPKM: Fragments Per Kilobase Million  
+TPM: Transcripts Per Kilobase Million  
+
+**V2**: separate lncRNAs
+
+# NOTES:
+1. Add Age (categories)
+1. Add "Extraction_Batch_phase1_and_phase2_UPDATED" as a random effects variable in all models
+2. In UC vs CD, in Colon samples, add "Drugs: biologics/small molecules/none"  
+
+# Sources
+https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7652264/  
+  
+https://bioconductor.org/packages/release/bioc/vignettes/DESeq2/inst/doc/DESeq2.html#funding  
+  
+
+https://stats.stackexchange.com/questions/178886/modelling-data-with-many-zeros-principal-component-analysis-vs-zero-inflated-m  
+  
+https://www.biorxiv.org/content/biorxiv/early/2015/06/14/019141.full.pdf  
+  
+https://www.google.com/search?q=ZIFA+zero+inflated&rlz=1C1GCEU_enUS974US974&oq=ZIFA+zero+inflated&aqs=chrome..69i57j0i546l4j69i61j69i60.8785j0j9&sourceid=chrome&ie=UTF-8  
+
+https://cougrstats.wordpress.com/2019/12/11/non-metric-multidimensional-scaling-nmds-in-r/
+
+# Setup
+```{r}
+# devtools::install_github("nyiuab/NBZIMM",
+#                          force = TRUE,
+#                          build_vignettes = FALSE)
+```
+
+```{r setup}
+memory.limit(size = 2^20)
+# options(scipen=999)
+
+require(data.table)
+require(ggplot2)
+require(table1)
+require(NBZIMM)
+require(VennDiagram)
+
+require(foreach)
+require(parallel)
+require(doParallel)
+
+require(vegan)
+
+# require(DT)
+# require(DNAMR)
+# require(erf)
+# require(randomForest)
+# require(ROCR)
+# require(nnet)
+# require(lme4)
+# require(DESeq2)
+# require(multcomp)
+# require(pscl)
+# require(betareg)
+```
+
+# PART I: Data Preparation
+# Load data
+```{r}
+#TPM data
+# dt1 <- fread("Data/biopsy_cts_raw.csv")
+dt1 <- fread("Data/biopsy_cts_true_tpm.csv")
+
+# Clinical variables
+dt2 <- fread("Data/UpdatedInflammationScores_Biopsy_PD_Cleaned_RK_7_25_18.csv")
+
+# Filtered lncRNAs
+dt3 <- fread("Data/lncipedia_transcript_type.lncRNA")
+length(unique(dt3$gene))
+length(unique(dt2$GRID))
+
+# Filter genes that are expressed high enough (above a threshold)
+dt4 <- fread("Data/biopsy_cts_tpm_symbol_filtered_log2.csv")
+```
+
+## Keep lncRNAs only
+```{r}
+# lncRNA only
+lncRNA <- unique(dt3$gene)
+length(lncRNA)
+# 49,935 genes
+
+# RNA expressed above a threshold (ask John)
+expRNA <- unique(dt4$V1)
+length(expRNA)
+# 31,065
+
+# non-coding and highly expressed RNA
+lncRNA_keep <- lncRNA[lncRNA %in% expRNA]
+length(lncRNA_keep)
+# 14,162
+
+# All RNA in the main dataset
+length(unique(dt1$V1))
+# 69,692
+
+sum(dt1$V1 %in% lncRNA_keep)
+# All 14,162 lncRNAs were found in the data
+
+dt1 <- dt1[V1 %in% lncRNA_keep, ]
+
+rm(list = ls()[!(ls() %in% c("dt1",
+                             "dt2"))])
+gc()
+```
+
+# Long data
+```{r}
+dt1l <- melt.data.table(data = dt1,
+                        id.vars = 1,
+                        measure.vars = 2:ncol(dt1),
+                        variable.name = "GRID_GUAID",
+                        value.name = "TPM")
+
+dt1l <- merge(dt2[, c("GRID_GUAID",
+                      "GRID",
+                      "IBD_disease",
+                      "Demographics_race",
+                      "Demographics_hispanic",
+                      "Demographics_gender",
+                      "Study_Eligibility_Birth_year",
+                      "RegionRe_3cat",
+                      "TypeRe",
+                      "Disease_Duration_Categoric",
+                      "IBD_severity_4levels",
+                      "MedicalHistory_asthma",
+                      "MedicalHistory_thyroid_disease",
+                      "MedicalHistory_rheumatoid_arthritis",
+                      "MedicalHistory_psoriasis",
+                      "MedicalHistory_ankylosing_spondylitis",
+                      "MedicalHistory_osteopenia_osteoporosis",
+                      "MedicalHistory_colon_cancer",
+                      "MedicalHistory_other_cancer",
+                      "MedicalHistory_appendectomy",
+                      "MedicalHistory_depression",
+                      "MedicalHistory_tobacco",
+                      "Extraction_Batch_phase1_and_phase2_UPDATED",
+                      
+                      "Medications_corticosteroids_current_Num_0and1",
+                      "Medications_entocort_current_Num_0and1",
+                      "Medications_flagyl_current_Num_0and1",
+                      "Medications_methotrexate_current_Num_0and1",
+                      "Medications_methotrexate_sub_current_Num_0and1",
+                      "Medications_neoral_current_Num_0and1",
+                      "Medications_prograf_current_Num_0and1",
+                      "Medications_purethinol_current_Num_0and1",
+                      "Medications_azulfidine_current_Num_0and1",
+                      "Medications_bisphosphonate_current_Num_0and1",
+                      
+                      "Medications_humira_current_Num_0and1",
+                      "Medications_remicade_current_Num_0and1",
+                      "Medications_tysabri_current_Num_0and1",
+                      "Medications_cimzia_current_Num_0and1",
+                      "Medications_simponi_current_Num_0and1",
+                      "Medications_entyvio_current_Num_0and1",
+                      "Medications_stelara_current_Num_0and1")],
+              dt1l,
+              all = FALSE)
+
+head(dt1l)
+summary(dt1l)
+gc()
+```
+
+# Convert variables
+## IBD Diagnosis
+```{r}
+# Remove "Indeterminate"
+id_rm <- unique(dt1l$GRID[dt1l$IBD_disease == "Indeterminate"])
+id_rm
+
+dt1l <- dt1l[!(GRID %in% id_rm), ]
+gc()
+
+dt1l$IBD_disease <- factor(dt1l$IBD_disease,
+                           levels = c("Control",
+                                      "UC",
+                                      "CD"))
+gc()
+```
+
+## Race
+```{r}
+# Remove subjects missing Race
+id_rm <- unique(dt1l$GRID[is.na(dt1l$Demographics_race)])
+id_rm
+
+dt1l <- dt1l[!(GRID %in% id_rm), ]
+gc()
+
+# Consolidate Race categories
+unique(dt1l$Demographics_race)
+dt1l$Demographics_race[!(dt1l$Demographics_race %in% c("White",
+                                                       "Black or African American"))] <- "Other"
+gc()
+
+# Percent samples
+round(100*prop.table(table(dt1l$Demographics_race)), 2)
+
+dt1l$Demographics_race  <- factor(dt1l$Demographics_race,
+                                  levels = c("White",
+                                             "Black or African American",
+                                             "Other"))
+gc()
+```
+
+## Ethnicity
+```{r}
+# Remove subjects missing ethnicity
+id_rm <- unique(dt1l$GRID[is.na(dt1l$Demographics_hispanic)])
+id_rm
+
+dt1l <- dt1l[!(GRID %in% id_rm), ]
+gc()
+
+# Percent samples
+round(100*prop.table(table(dt1l$Demographics_hispanic)), 2)
+
+dt1l$Demographics_hispanic  <- factor(dt1l$Demographics_hispanic,
+                                      levels = c("No",
+                                                 "Yes"))
+gc()
+```
+
+## Gender
+```{r}
+# Percent samples
+round(100*prop.table(table(dt1l$Demographics_gender)), 2)
+
+dt1l$Demographics_gender  <- factor(dt1l$Demographics_gender,
+                                    levels = c("Female",
+                                               "Male"))
+gc()
+```
+
+## Biopsy location
+```{r}
+round(100*prop.table(table(dt1l$RegionRe_3cat)), 2)
+
+nrow(dt1l[is.na(RegionRe_3cat), ])
+# None missing
+
+dt1l$RegionRe_3cat <- factor(dt1l$RegionRe_3cat,
+                             levels = c("colon_nonRectum",
+                                        "Ileum",
+                                        "Rectum"))
+gc()
+```
+
+## Sampled tissue inflammed 
+```{r}
+round(100*prop.table(table(dt1l$TypeRe)), 2)
+
+nrow(dt1l[is.na(TypeRe), ])
+# None missing
+
+dt1l$TypeRe <- factor(dt1l$TypeRe,
+                      levels = c("NonI",
+                                 "I"),
+                      labels = c("Non-Inflamed",
+                                 "Inflamed"))
+gc()
+```
+
+## Disease Duration (DO NOT USE)
+```{r}
+dt1l$Disease_Duration_Categoric <- factor(dt1l$Disease_Duration_Categoric,
+                                          levels = c("under_2years",
+                                                     "2to5years",
+                                                     "over_5years"))
+summary(dt1l$Disease_Duration_Categoric)
+
+length(unique(dt1l$GRID[is.na(dt1l$Disease_Duration_Categoric)]))
+# NOTE: 240 subjects missing Disease Duration data
+
+gc()
+```
+
+## IBD Severity (DO NOT USE)
+```{r}
+dt1l$IBD_severity_4levels <- factor(dt1l$IBD_severity_4levels,
+                                    levels = c( "Inactive_IBD",
+                                                "Mild_IBD",
+                                                "Moderate_IBD",
+                                                "Severe_IBD"))
+length(unique(dt1l$GRID[is.na(dt1l$IBD_severity_4levels)]))
+# NOTE: 243 subjects missing IBD Severity
+
+gc()
+```
+
+## Astma
+```{r}
+dt1l$MedicalHistory_asthma <- factor(dt1l$MedicalHistory_asthma,
+                                     levels = c("No",
+                                                "Yes"))
+length(unique(dt1l$GRID[is.na(dt1l$MedicalHistory_asthma)]))
+# None missing
+
+gc()
+```
+
+## Thyroid Disease
+```{r}
+dt1l$MedicalHistory_thyroid_disease <- factor(dt1l$MedicalHistory_thyroid_disease,
+                                              levels = c("No",
+                                                         "Yes"))
+length(unique(dt1l$GRID[is.na(dt1l$MedicalHistory_thyroid_disease)]))
+# None missing
+
+gc()
+```
+
+## Rheumatoid Arthriti
+```{r}
+dt1l$MedicalHistory_rheumatoid_arthritis <- factor(dt1l$MedicalHistory_rheumatoid_arthritis,
+                                                   levels = c("No",
+                                                              "Yes"))
+length(unique(dt1l$GRID[is.na(dt1l$MedicalHistory_rheumatoid_arthritis)]))
+# None missing
+
+gc()
+```
+
+## Psoriasis
+```{r}
+dt1l$MedicalHistory_psoriasis <- factor(dt1l$MedicalHistory_psoriasis,
+                                        levels = c("No",
+                                                   "Yes"))
+length(unique(dt1l$GRID[is.na(dt1l$MedicalHistory_psoriasis)]))
+# None missing
+
+gc()
+```
+
+## Ankylosing Spondylitis
+```{r}
+dt1l$MedicalHistory_ankylosing_spondylitis <- factor(dt1l$MedicalHistory_ankylosing_spondylitis,
+                                                     levels = c("No",
+                                                                "Yes"))
+length(unique(dt1l$GRID[is.na(dt1l$MedicalHistory_ankylosing_spondylitis)]))
+# None missing
+
+gc()
+```
+
+## Osteopenia and Osteoporosis
+```{r}
+dt1l$MedicalHistory_osteopenia_osteoporosis <- factor(dt1l$MedicalHistory_osteopenia_osteoporosis,
+                                                      levels = c("No",
+                                                                 "Yes"))
+length(unique(dt1l$GRID[is.na(dt1l$MedicalHistory_osteopenia_osteoporosis)]))
+# None missing
+
+gc()
+```
+
+## Colon Cancer
+```{r}
+dt1l$MedicalHistory_colon_cancer <- factor(dt1l$MedicalHistory_colon_cancer,
+                                           levels = c("No",
+                                                      "Yes"))
+length(unique(dt1l$GRID[is.na(dt1l$MedicalHistory_colon_cancer)]))
+# None missing
+
+gc()
+```
+
+## Other Cancers
+```{r}
+dt1l$MedicalHistory_other_cancer <- factor(dt1l$MedicalHistory_other_cancer,
+                                           levels = c("No",
+                                                      "Yes"))
+length(unique(dt1l$GRID[is.na(dt1l$MedicalHistory_other_cancer)]))
+# None missing
+
+gc()
+```
+
+## Cancer (all types)
+```{r}
+dt1l$cancer <- "No"
+dt1l$cancer[dt1l$MedicalHistory_colon_cancer == "Yes" |
+              dt1l$MedicalHistory_other_cancer == "Yes"] <- "Yes"
+dt1l$cancer <- factor(dt1l$cancer,
+                      levels = c("No",
+                                 "Yes"))
+gc()
+```
+
+## Appendectomy
+```{r}
+dt1l$MedicalHistory_appendectomy <- factor(dt1l$MedicalHistory_appendectomy,
+                                           levels = c("No",
+                                                      "Yes"))
+length(unique(dt1l$GRID[is.na(dt1l$MedicalHistory_appendectomy)]))
+# None missing
+
+gc()
+```
+
+## Depression
+```{r}
+dt1l$MedicalHistory_depression <- factor(dt1l$MedicalHistory_depression,
+                                         levels = c("No",
+                                                    "Yes"))
+length(unique(dt1l$GRID[is.na(dt1l$MedicalHistory_depression)]))
+# None missing
+
+gc()
+```
+
+## Tobacco
+```{r}
+dt1l$MedicalHistory_tobacco <- factor(dt1l$MedicalHistory_tobacco,
+                                      levels = c("No",
+                                                 "Yes"))
+length(unique(dt1l$GRID[is.na(dt1l$MedicalHistory_tobacco)]))
+# None missing
+
+gc()
+```
+
+## Gene names
+```{r}
+# Rename gene name column
+colnames(dt1l)[which(colnames(dt1l) == "V1")] <- "Gene"
+dt1l$Gene <- factor(dt1l$Gene)
+gc()
+```
+
+## Age group
+```{r}
+dt1l$birth_year <- "Before 1960"
+dt1l$birth_year[dt1l$Study_Eligibility_Birth_year > 1959] <- "1960 to 1969"
+dt1l$birth_year[dt1l$Study_Eligibility_Birth_year > 1969] <- "1970 to 1979"
+dt1l$birth_year[dt1l$Study_Eligibility_Birth_year > 1979] <- "1980 and after"
+
+dt1l$birth_year <- factor(dt1l$birth_year,
+                          levels = c("Before 1960",
+                                     "1960 to 1969",
+                                     "1970 to 1979",
+                                     "1980 and after"))
+gc()
+
+round(100*prop.table(table(dt1l$birth_year)), 2)
+
+# Delete Age variable
+dt1l$Study_Eligibility_Birth_year <- NULL
+gc()
+```
+
+## Batch
+```{r}
+dt1l$Extraction_Batch_phase1_and_phase2_UPDATED <- factor(dt1l$Extraction_Batch_phase1_and_phase2_UPDATED)
+length(unique(dt1l$GRID[is.na(dt1l$Extraction_Batch_phase1_and_phase2_UPDATED)]))
+# None missing
+
+gc()
+```
+
+## Medications
+```{r}
+dt1l$SM <- FALSE
+dt1l[Medications_corticosteroids_current_Num_0and1 == "Yes" |
+       Medications_entocort_current_Num_0and1 == "Yes" |
+       Medications_flagyl_current_Num_0and1 == "Yes" |
+       Medications_methotrexate_current_Num_0and1 == "Yes" |
+       Medications_methotrexate_sub_current_Num_0and1 == "Yes" |
+       Medications_neoral_current_Num_0and1 == "Yes" |
+       Medications_prograf_current_Num_0and1 == "Yes" |
+       Medications_purethinol_current_Num_0and1 == "Yes" |
+       Medications_azulfidine_current_Num_0and1 == "Yes" |
+       Medications_bisphosphonate_current_Num_0and1 == "Yes", ]$SM <- TRUE
+gc()
+
+dt1l$LM <- FALSE
+dt1l[Medications_humira_current_Num_0and1 == "Yes" |
+       Medications_remicade_current_Num_0and1 == "Yes" |
+       Medications_tysabri_current_Num_0and1 == "Yes" |
+       Medications_cimzia_current_Num_0and1 == "Yes" |
+       Medications_simponi_current_Num_0and1 == "Yes" |
+       Medications_entyvio_current_Num_0and1 == "Yes" |
+       Medications_stelara_current_Num_0and1 == "Yes", ]$LM <- TRUE
+gc()
+
+dt1l$Medications <- "None"
+dt1l$Medications[dt1l$SM == TRUE & 
+                   dt1l$LM == FALSE] <- "Small_Molecule_Only"
+dt1l$Medications[dt1l$SM == FALSE &
+                   dt1l$LM == TRUE] <- "Biologics_Only"
+dt1l$Medications[dt1l$SM == TRUE &
+                   dt1l$LM == TRUE] <- "Small Molecule_and_Biologics"
+dt1l$Medications <- factor(dt1l$Medications,
+                           levels = c("None",
+                                      "Small_Molecule_Only",
+                                      "Biologics_Only",
+                                      "Small Molecule_and_Biologics"))
+gc()
+```
+
+```{r}
+table(dt1l$SM,
+      dt1l$LM)
+```
+
+## Delete unused variables
+```{r}
+dt1l <- dt1l[, -c("Medications_corticosteroids_current_Num_0and1",
+                  "Medications_entocort_current_Num_0and1",
+                  "Medications_flagyl_current_Num_0and1",
+                  "Medications_methotrexate_current_Num_0and1",
+                  "Medications_methotrexate_sub_current_Num_0and1",
+                  "Medications_neoral_current_Num_0and1",
+                  "Medications_prograf_current_Num_0and1",
+                  "Medications_purethinol_current_Num_0and1",
+                  "Medications_azulfidine_current_Num_0and1",
+                  "Medications_bisphosphonate_current_Num_0and1",
+                  
+                  "Medications_humira_current_Num_0and1",
+                  "Medications_remicade_current_Num_0and1",
+                  "Medications_tysabri_current_Num_0and1",
+                  "Medications_cimzia_current_Num_0and1",
+                  "Medications_simponi_current_Num_0and1",
+                  "Medications_entyvio_current_Num_0and1",
+                  "Medications_stelara_current_Num_0and1")]
+gc()
+```
+
+## Sample IDs
+```{r}
+dt1l$GRID_GUAID <- factor(dt1l$GRID_GUAID,
+                          levels = unique(dt1l$GRID_GUAID))
+gc()
+```
+
+## Subject IDs
+```{r}
+dt1l$GRID <- factor(dt1l$GRID,
+                    levels = unique(dt1l$GRID))
+gc()
+```
+
+## Number of samples in each subgroup
+```{r}
+tmp <- unique(dt1l[, c("GRID",
+                       "IBD_disease",
+                       "RegionRe_3cat",
+                       "TypeRe")])
+
+t1 <- data.table(addmargins(table(tmp$IBD_disease,
+                                  tmp$RegionRe_3cat,
+                                  tmp$TypeRe)))
+
+t1 <- dcast.data.table(t1,
+                       V2 + V3 ~ V1,
+                       value.var = "N")
+write.csv(t1,
+          file = "tmp/t1.csv")
+t1
+```
+
+## Remove rare type of samples
+```{r}
+# Remove inflamed controls
+dt1l <- droplevels(dt1l[!(IBD_disease == "Control" &
+                            TypeRe == "Inflamed"), ])
+
+# Remove inflamed ileum UC
+dt1l <- droplevels(dt1l[!(IBD_disease == "UC" &
+                            dt1l$RegionRe_3cat == "Ileum" &
+                            TypeRe == "Inflamed"), ])
+```
+
+## Remove 3 patients with missing UC severity
+```{r}
+id_rm <- unique(dt1l[IBD_disease == "UC" &
+                       !(IBD_severity_4levels %in% levels(IBD_severity_4levels)),]$GRID)
+id_rm
+dt1l <- droplevels(dt1l[!(GRID %in% id_rm), ])
+gc()
+```
+
+## Subject summary
+```{r}
+length(unique(dt1l$GRID))
+
+pat <- unique(dt1l[, c("GRID",
+                       "IBD_disease",
+                       "Demographics_race",
+                       "Demographics_hispanic",
+                       "Demographics_gender",
+                       # "RegionRe_3cat",
+                       # "TypeRe",
+                       "birth_year",
+                       "Disease_Duration_Categoric",
+                       "IBD_severity_4levels",
+                       "MedicalHistory_asthma",
+                       "MedicalHistory_thyroid_disease",
+                       "MedicalHistory_rheumatoid_arthritis",
+                       "MedicalHistory_psoriasis",
+                       "MedicalHistory_ankylosing_spondylitis",
+                       "MedicalHistory_osteopenia_osteoporosis",
+                       "MedicalHistory_colon_cancer",
+                       "MedicalHistory_other_cancer",
+                       "cancer",
+                       "MedicalHistory_appendectomy",
+                       "MedicalHistory_depression",
+                       "MedicalHistory_tobacco",
+                       "SM",
+                       "LM",
+                       "Medications")])
+```
+
+## Table 1
+```{r}
+table1(~ .| IBD_disease,
+       data = pat[, -1])
+```
+
+## logTPM
+```{r}
+dt1l[, logTPM := log(1 + (TPM/min(TPM[TPM > 0]))),
+    by = Gene]
+
+dt1l[, logTPM2 := log(1 + TPM),
+    by = Gene]
+
+length(unique(dt1l$GRID_GUAID))
+length(unique(dt1l$GRID))
+
+gc() 
+```
+
+## Check transformed data
+```{r}
+tmp <- dt1l[Gene %in% sample(x = levels(dt1l$Gene),
+                             size = 9,
+                             replace = FALSE)]
+```
+
+```{r,fig.width=5,fig.height=5}
+ggplot(tmp,
+       aes(x = TPM,
+           group = IBD_disease,
+           fill = IBD_disease)) +
+  facet_wrap(~ Gene,
+             scale = "free") +
+  geom_histogram(alpha = 0.5,
+                 bins = 50) +
+  theme_bw() +
+  theme(legend.position = "top")
+
+ggplot(tmp,
+       aes(x = logTPM,
+           group = IBD_disease,
+           fill = IBD_disease)) +
+  facet_wrap(~ Gene,
+             scale = "free") +
+  geom_histogram(alpha = 0.5,
+                 bins = 50) +
+  theme_bw() +
+  theme(legend.position = "top")
+
+ggplot(tmp,
+       aes(x = logTPM2,
+           group = IBD_disease,
+           fill = IBD_disease)) +
+  facet_wrap(~ Gene,
+             scale = "free") +
+  geom_histogram(alpha = 0.5,
+                 bins = 50) +
+  theme_bw() +
+  theme(legend.position = "top")
+
+ggplot(tmp,
+       aes(x = logTPM,
+           group = TypeRe,
+           fill = TypeRe)) +
+  facet_wrap(~ Gene,
+             scale = "free") +
+  geom_histogram(alpha = 0.5,
+                 bins = 50) +
+  theme_bw() +
+  theme(legend.position = "top")
+
+ggplot(tmp,
+       aes(x = logTPM,
+           group = RegionRe_3cat,
+           fill = RegionRe_3cat)) +
+  facet_wrap(~ Gene,
+             scale = "free") +
+  geom_histogram(alpha = 0.5,
+                 bins = 50) +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+## Clean memory
+```{r}
+rm(list = ls()[ls() != "dt1l"])
+dt1l$logTPM2 <- NULL
+
+gc()
+```
+
+## Save analysis dataset
+```{r}
+attr(dt1l,
+     "created") <- date()
+attr(dt1l,
+     c("description")) <- "Source: 'biopsy_cts_pub1_v3.Rmd'."
+save(dt1l,
+     file = "Data/dt1l.RData")
+```
+
+# PART II: Hypothesis Testing
+**RELOAD THE PROJECT**
+# Reload analysis dataset
+```{r}
+load("Data/dt1l.RData")
+
+nlevels(dt1l$Gene)
+# 14,162
+```
+1,151 patients
+
+# Functions
+```{r}
+foo2 <- function(logTPM,
+                 ibd_infl,
+                 Batch) {
+  
+  dt <- data.frame(logTPM = logTPM,
+                   ibd_infl = ibd_infl,
+                   Batch = Batch)
+  
+  m1 <- try({
+    
+    lme.zig(fixed = logTPM ~ ibd_infl,
+            random = ~ 1| Batch,
+            zi_fixed = ~ ibd_infl,
+            data = dt,
+            verbose = FALSE)
+  })
+  if(class(m1)[1] == "try-error") {
+    m2 <- try({
+      lme.zig(fixed = logTPM ~ ibd_infl,
+              random = ~ 1| Batch,
+              zi_fixed = ~ ibd_infl,
+              data = dt,
+              verbose = FALSE)
+    })
+    
+    if (class(m2)[1] == "try-error") {
+      return(NA)
+    } else {
+      return(fixed(m2))
+    }
+    
+  } else {
+    return(fixed(m1))
+  }
+}
+
+foo3 <- function(logTPM,
+                 ibd_infl,
+                 Batch,
+                 Demographics_race,
+                 Demographics_hispanic,
+                 Demographics_gender,
+                 birth_year,
+                 MedicalHistory_asthma,
+                 MedicalHistory_thyroid_disease,
+                 MedicalHistory_rheumatoid_arthritis,
+                 MedicalHistory_psoriasis,
+                 MedicalHistory_ankylosing_spondylitis,
+                 MedicalHistory_osteopenia_osteoporosis,
+                 MedicalHistory_appendectomy,
+                 MedicalHistory_depression,
+                 MedicalHistory_tobacco,
+                 cancer) {
+  
+  dt <- data.frame(logTPM = logTPM,
+                   ibd_infl = ibd_infl,
+                   Batch = Batch,
+                   Demographics_race = Demographics_race,
+                   Demographics_hispanic = Demographics_hispanic,
+                   Demographics_gender = Demographics_gender,
+                   birth_year = birth_year,
+                   MedicalHistory_asthma = MedicalHistory_asthma,
+                   MedicalHistory_thyroid_disease = MedicalHistory_thyroid_disease,
+                   MedicalHistory_rheumatoid_arthritis = MedicalHistory_rheumatoid_arthritis,
+                   MedicalHistory_psoriasis = MedicalHistory_psoriasis,
+                   MedicalHistory_ankylosing_spondylitis = MedicalHistory_ankylosing_spondylitis,
+                   MedicalHistory_osteopenia_osteoporosis= MedicalHistory_osteopenia_osteoporosis,
+                   MedicalHistory_appendectomy = MedicalHistory_appendectomy,
+                   MedicalHistory_depression = MedicalHistory_depression,
+                   MedicalHistory_tobacco = MedicalHistory_tobacco,
+                   cancer = cancer)
+  
+  m1 <- try({
+    lme.zig(fixed = logTPM ~ ibd_infl +
+              Demographics_race +
+              Demographics_hispanic +
+              Demographics_gender +
+              birth_year +
+              MedicalHistory_asthma +
+              MedicalHistory_thyroid_disease +
+              MedicalHistory_rheumatoid_arthritis +
+              MedicalHistory_psoriasis +
+              MedicalHistory_ankylosing_spondylitis +
+              MedicalHistory_osteopenia_osteoporosis +
+              MedicalHistory_appendectomy +
+              MedicalHistory_depression +
+              MedicalHistory_tobacco +
+              cancer,
+            random = ~ 1| Batch,
+            zi_fixed = ~ ibd_infl +
+              Demographics_race +
+              Demographics_hispanic +
+              Demographics_gender +
+              birth_year +
+              MedicalHistory_asthma +
+              MedicalHistory_thyroid_disease +
+              MedicalHistory_rheumatoid_arthritis +
+              MedicalHistory_psoriasis +
+              MedicalHistory_ankylosing_spondylitis +
+              MedicalHistory_osteopenia_osteoporosis +
+              MedicalHistory_appendectomy +
+              MedicalHistory_depression +
+              MedicalHistory_tobacco +
+              cancer,
+            data = dt,
+            verbose = FALSE)
+  })
+  if(class(m1)[1] == "try-error") {
+    m2 <- try({
+      lme(fixed = logTPM ~ ibd_infl +
+            Demographics_race +
+            Demographics_hispanic +
+            Demographics_gender +
+            birth_year +
+            MedicalHistory_asthma +
+            MedicalHistory_thyroid_disease +
+            MedicalHistory_rheumatoid_arthritis +
+            MedicalHistory_psoriasis +
+            MedicalHistory_ankylosing_spondylitis +
+            MedicalHistory_osteopenia_osteoporosis +
+            MedicalHistory_appendectomy +
+            MedicalHistory_depression +
+            MedicalHistory_tobacco +
+            cancer,
+          random = ~ 1| Batch,
+          data = dt)
+    })
+    
+    if (class(m2)[1] == "try-error") {
+      return(NA)
+    } else {
+      return(fixed(m2))
+    }
+    
+  } else {
+    return(fixed(m1))
+  }
+}
+
+foo21 <- function(logTPM,
+                  ibd_infl,
+                  Batch,
+                  GRID) {
+  
+  dt <- data.frame(logTPM = logTPM,
+                   ibd_infl = ibd_infl,
+                   Batch = Batch,
+                   GRID = GRID)
+  
+  m1 <- try({
+    lme.zig(fixed = logTPM ~ ibd_infl,
+            random = list(~ 1| Batch,
+                          ~ 1| GRID),
+            zi_fixed = ~ ibd_infl,
+            data = dt,
+            verbose = FALSE)
+  })
+  if(class(m1)[1] == "try-error") {
+    m2 <- try({
+      lme(fixed = logTPM ~ ibd_infl,
+          random = list(~ 1| Batch,
+                        ~ 1| GRID),
+          data = dt)
+    })
+    
+    if (class(m2)[1] == "try-error") {
+      return(NA)
+    } else {
+      return(fixed(m2))
+    }
+    
+  } else {
+    return(fixed(m1))
+  }
+}
+
+foo31 <- function(logTPM,
+                  ibd_infl,
+                  Batch,
+                  GRID,
+                  Demographics_race,
+                  Demographics_hispanic,
+                  Demographics_gender,
+                  birth_year,
+                  MedicalHistory_asthma,
+                  MedicalHistory_thyroid_disease,
+                  MedicalHistory_rheumatoid_arthritis,
+                  MedicalHistory_psoriasis,
+                  MedicalHistory_ankylosing_spondylitis,
+                  MedicalHistory_osteopenia_osteoporosis,
+                  MedicalHistory_appendectomy,
+                  MedicalHistory_depression,
+                  MedicalHistory_tobacco,
+                  cancer) {
+  
+  dt <- data.frame(logTPM = logTPM,
+                   ibd_infl = ibd_infl,
+                   Batch = Batch,
+                   GRID = GRID,
+                   Demographics_race = Demographics_race,
+                   Demographics_hispanic = Demographics_hispanic,
+                   Demographics_gender = Demographics_gender,
+                   birth_year = birth_year,
+                   MedicalHistory_asthma = MedicalHistory_asthma,
+                   MedicalHistory_thyroid_disease = MedicalHistory_thyroid_disease,
+                   MedicalHistory_rheumatoid_arthritis = MedicalHistory_rheumatoid_arthritis,
+                   MedicalHistory_psoriasis = MedicalHistory_psoriasis,
+                   MedicalHistory_ankylosing_spondylitis = MedicalHistory_ankylosing_spondylitis,
+                   MedicalHistory_osteopenia_osteoporosis= MedicalHistory_osteopenia_osteoporosis,
+                   MedicalHistory_appendectomy = MedicalHistory_appendectomy,
+                   MedicalHistory_depression = MedicalHistory_depression,
+                   MedicalHistory_tobacco = MedicalHistory_tobacco,
+                   cancer = cancer)
+  
+  m1 <- try({
+    lme.zig(fixed = logTPM ~ ibd_infl +
+              Demographics_race +
+              Demographics_hispanic +
+              Demographics_gender +
+              birth_year +
+              MedicalHistory_asthma +
+              MedicalHistory_thyroid_disease +
+              MedicalHistory_rheumatoid_arthritis +
+              MedicalHistory_psoriasis +
+              MedicalHistory_ankylosing_spondylitis +
+              MedicalHistory_osteopenia_osteoporosis +
+              MedicalHistory_appendectomy +
+              MedicalHistory_depression +
+              MedicalHistory_tobacco +
+              cancer,
+            random = list(~ 1| Batch,
+                          ~ 1| GRID),
+            zi_fixed = ~ ibd_infl +
+              Demographics_race +
+              Demographics_hispanic +
+              Demographics_gender +
+              birth_year +
+              MedicalHistory_asthma +
+              MedicalHistory_thyroid_disease +
+              MedicalHistory_rheumatoid_arthritis +
+              MedicalHistory_psoriasis +
+              MedicalHistory_ankylosing_spondylitis +
+              MedicalHistory_osteopenia_osteoporosis +
+              MedicalHistory_appendectomy +
+              MedicalHistory_depression +
+              MedicalHistory_tobacco +
+              cancer,
+            data = dt,
+            verbose = FALSE)
+  })
+  if(class(m1)[1] == "try-error") {
+    m2 <- try({
+      lme(fixed = logTPM ~ ibd_infl +
+            Demographics_race +
+            Demographics_hispanic +
+            Demographics_gender +
+            birth_year +
+            MedicalHistory_asthma +
+            MedicalHistory_thyroid_disease +
+            MedicalHistory_rheumatoid_arthritis +
+            MedicalHistory_psoriasis +
+            MedicalHistory_ankylosing_spondylitis +
+            MedicalHistory_osteopenia_osteoporosis +
+            MedicalHistory_appendectomy +
+            MedicalHistory_depression +
+            MedicalHistory_tobacco +
+            cancer,
+          random = list(~ 1| Batch,
+                        ~ 1| GRID),
+          data = dt)
+    })
+    
+    if (class(m2)[1] == "try-error") {
+      return(NA)
+    } else {
+      return(fixed(m2))
+    }
+  } else {
+    return(fixed(m1))
+  }
+}
+
+foo22 <- function(logTPM,
+                  IBD_disease,
+                  TypeRe,
+                  Batch,
+                  GRID) {
+  
+  dt <- data.frame(logTPM = logTPM,
+                   IBD_disease = IBD_disease,
+                   TypeRe = TypeRe,
+                   Batch = Batch,
+                   GRID = GRID)
+  dt <- droplevels(dt[IBD_disease != "Control", ])
+  
+  m1 <- try({
+    lme.zig(fixed = logTPM ~ IBD_disease +
+              TypeRe,
+            random = list(~ 1| Batch,
+                          ~ 1| GRID),
+            zi_fixed = ~ IBD_disease +
+              TypeRe,
+            data = dt,
+            verbose = FALSE)
+  })
+  if(class(m1)[1] == "try-error") {
+    m2 <- try({
+      lme(fixed = logTPM ~ IBD_disease +
+            TypeRe,
+          random = list(~ 1| Batch,
+                        ~ 1| GRID),
+          data = dt)
+    })
+    
+    if (class(m2)[1] == "try-error") {
+      return(NA)
+    } else {
+      return(fixed(m2))
+    }
+    
+  } else {
+    return(fixed(m1))
+  }
+}
+
+foo32 <- function(logTPM,
+                  IBD_disease,
+                  TypeRe,
+                  Batch,
+                  GRID,
+                  Demographics_race,
+                  Demographics_hispanic,
+                  Demographics_gender,
+                  birth_year,
+                  MedicalHistory_asthma,
+                  MedicalHistory_thyroid_disease,
+                  MedicalHistory_rheumatoid_arthritis,
+                  MedicalHistory_psoriasis,
+                  MedicalHistory_ankylosing_spondylitis,
+                  MedicalHistory_osteopenia_osteoporosis,
+                  MedicalHistory_appendectomy,
+                  MedicalHistory_depression,
+                  MedicalHistory_tobacco,
+                  cancer) {
+  
+  dt <- data.frame(logTPM = logTPM,
+                   IBD_disease = IBD_disease,
+                   TypeRe = TypeRe,
+                   Batch = Batch,
+                   GRID = GRID,
+                   Demographics_race = Demographics_race,
+                   Demographics_hispanic = Demographics_hispanic,
+                   Demographics_gender = Demographics_gender,
+                   birth_year = birth_year,
+                   MedicalHistory_asthma = MedicalHistory_asthma,
+                   MedicalHistory_thyroid_disease = MedicalHistory_thyroid_disease,
+                   MedicalHistory_rheumatoid_arthritis = MedicalHistory_rheumatoid_arthritis,
+                   MedicalHistory_psoriasis = MedicalHistory_psoriasis,
+                   MedicalHistory_ankylosing_spondylitis = MedicalHistory_ankylosing_spondylitis,
+                   MedicalHistory_osteopenia_osteoporosis= MedicalHistory_osteopenia_osteoporosis,
+                   MedicalHistory_appendectomy = MedicalHistory_appendectomy,
+                   MedicalHistory_depression = MedicalHistory_depression,
+                   MedicalHistory_tobacco = MedicalHistory_tobacco,
+                   cancer = cancer)
+  
+  m1 <- try({
+    lme.zig(fixed = logTPM ~ IBD_disease +
+              TypeRe +
+              Demographics_race +
+              Demographics_hispanic +
+              Demographics_gender +
+              birth_year +
+              MedicalHistory_asthma +
+              MedicalHistory_thyroid_disease +
+              MedicalHistory_rheumatoid_arthritis +
+              MedicalHistory_psoriasis +
+              MedicalHistory_ankylosing_spondylitis +
+              MedicalHistory_osteopenia_osteoporosis +
+              MedicalHistory_appendectomy +
+              MedicalHistory_depression +
+              MedicalHistory_tobacco +
+              cancer,
+            random = list(~ 1| Batch,
+                          ~ 1| GRID),
+            zi_fixed = ~ IBD_disease +
+              TypeRe +
+              Demographics_race +
+              Demographics_hispanic +
+              Demographics_gender +
+              birth_year +
+              MedicalHistory_asthma +
+              MedicalHistory_thyroid_disease +
+              MedicalHistory_rheumatoid_arthritis +
+              MedicalHistory_psoriasis +
+              MedicalHistory_ankylosing_spondylitis +
+              MedicalHistory_osteopenia_osteoporosis +
+              MedicalHistory_appendectomy +
+              MedicalHistory_depression +
+              MedicalHistory_tobacco +
+              cancer,
+            data = dt,
+            verbose = FALSE)
+  })
+  if(class(m1)[1] == "try-error") {
+    m2 <- try({
+      lme(fixed = logTPM ~ IBD_disease +
+            TypeRe +
+            Demographics_race +
+            Demographics_hispanic +
+            Demographics_gender +
+            birth_year +
+            MedicalHistory_asthma +
+            MedicalHistory_thyroid_disease +
+            MedicalHistory_rheumatoid_arthritis +
+            MedicalHistory_psoriasis +
+            MedicalHistory_ankylosing_spondylitis +
+            MedicalHistory_osteopenia_osteoporosis +
+            MedicalHistory_appendectomy +
+            MedicalHistory_depression +
+            MedicalHistory_tobacco +
+            cancer,
+          random = list(~ 1| Batch,
+                        ~ 1| GRID),
+          data = dt)
+    })
+    
+    if (class(m2)[1] == "try-error") {
+      return(NA)
+    } else {
+      return(fixed(m2))
+    }
+  } else {
+    return(fixed(m1))
+  }
+}
+```
+
+# Split data by biophsy location and sample inflamation level
+```{r}
+dtt1 <- list(il = droplevels(dt1l[RegionRe_3cat == "Ileum",]),
+            co = droplevels(dt1l[RegionRe_3cat == "colon_nonRectum",]),
+            re = droplevels(dt1l[RegionRe_3cat == "Rectum",]))
+
+do.call("c", lapply(dtt1, nrow))
+
+lapply(dtt1,
+       function(a) {
+         table(a$IBD_disease,
+               a$TypeRe)
+       })
+
+gc()
+```
+
+# Ileum
+## Data
+### Number of samples per patient
+```{r}
+length(unique(dtt1$il$GRID))
+
+nsamples <- dtt1$il[, .(N = .N),
+                    by = list(Gene,
+                              GRID,
+                              IBD_disease,
+                              TypeRe)]
+
+t1 <- data.table(table(nsamples$Gene,
+                       nsamples$GRID,
+                       nsamples$IBD_disease,
+                       nsamples$TypeRe,
+                       nsamples$N))
+
+t1 <- dcast.data.table(t1,
+                       V1 + V2 + V3 ~ V4,
+                       value.var = "N")
+t1
+
+# None of the samples have replicates
+sum(t1$`Non-Inflamed` > 1)
+sum(t1$Inflamed > 1)
+
+# Subjects with both, inflamed and non-inflamed samples
+t2 <- t1[Inflamed == 1 & 
+           `Non-Inflamed` == 1,]
+t2
+length(unique(t2$V1))
+
+# Only 6 subjects have paired samples
+unique(t2$V2)
+
+# All 6 subjects are CD
+unique(t2$V3)
+```
+There are just 6 CD patients with paired inflamed/non-inflamed ileum samples.  
+Ignore repeated measures and run sample-level analysis.  
+
+### Add combined level factor
+```{r}
+il <- dtt1$il
+
+il$ibd_infl <- paste(il$IBD_disease,
+                     il$TypeRe,
+                     sep = "_")
+il$ibd_infl <- factor(il$ibd_infl,
+                      levels = c("Control_Non-Inflamed",
+                                 "UC_Non-Inflamed",
+                                 "CD_Non-Inflamed" ,
+                                 "CD_Inflamed"))
+
+gc()
+```
+### Number of batches
+```{r}
+length(unique(il$Extraction_Batch_phase1_and_phase2_UPDATED))
+```
+
+### Split data for parallel processing
+```{r}
+N <- length(unique(il$Gene))
+floor(N/12)
+
+ndx_stop <- c(c(1:11)*floor(N/12),
+              N)
+ndx_start <- c(1,
+               ndx_stop[1:11] + 1)
+
+ndx_start
+ndx_stop  
+```
+
+### Create list
+```{r}
+dtt_il <- list()
+
+for (i in 1:length(ndx_start)) {
+  dtt_il[[i]] <- il[Gene %in% levels(Gene)[ndx_start[i]:ndx_stop[i]], ]
+}
+
+gc()
+```
+
+## NBZIMM/lme
+### Register cores
+```{r}
+cl <- makeCluster(getOption("cl.cores",
+                            detectCores()/2))
+cl
+registerDoParallel(cl)
+```
+
+### Run
+```{r}
+system.time({
+  res12 <- foreach(i = 1:12) %dopar% {
+    require(data.table)
+    require(NBZIMM)
+    tmp <- dtt_il[[i]]
+    
+    tmp[, .(out = list(foo2(logTPM,
+                            ibd_infl,
+                            Extraction_Batch_phase1_and_phase2_UPDATED))),
+        by = Gene]
+  }
+})
+
+# user  system elapsed 
+# 6.54   10.55  434.98
+```
+
+### Stop the cluster and clean memory
+```{r}
+stopCluster(cl)
+gc()
+```
+
+```{r}
+res12[[1]]$Gene[1:10]
+res12[[1]]$out[[1]]
+```
+
+## Adjusted NBZIMM/lme
+### Register cores
+```{r}
+cl <- makeCluster(getOption("cl.cores",
+                            detectCores()/2))
+cl
+registerDoParallel(cl)
+```
+
+### Run
+```{r}
+system.time({
+  res13 <- foreach(i = 1:12) %dopar% {
+    require(data.table)
+    require(NBZIMM)
+    tmp <- dtt_il[[i]]
+    
+    tmp[, .(out = list(foo3(logTPM,
+                            ibd_infl,
+                            Extraction_Batch_phase1_and_phase2_UPDATED,
+                            Demographics_race,
+                            Demographics_hispanic,
+                            Demographics_gender,
+                            birth_year,
+                            MedicalHistory_asthma,
+                            MedicalHistory_thyroid_disease,
+                            MedicalHistory_rheumatoid_arthritis,
+                            MedicalHistory_psoriasis,
+                            MedicalHistory_ankylosing_spondylitis,
+                            MedicalHistory_osteopenia_osteoporosis,
+                            MedicalHistory_appendectomy,
+                            MedicalHistory_depression,
+                            MedicalHistory_tobacco,
+                            cancer))),
+        by = Gene]
+  }
+})
+
+# user  system elapsed 
+# 6.93    9.11  994.37 
+```
+
+### Stop the cluster and clean memory
+```{r}
+stopCluster(cl)
+gc()
+```
+
+```{r}
+res13[[1]]$Gene[1:10]
+res13[[1]]$out[[1]]
+```
+
+## Save Ileum models
+```{r}
+save(res12,
+     file = "tmp/res12_il_lme")
+save(res13,
+     file = "tmp/res13_il_lme_adj")
+```
+
+# Colon
+## Data
+### Number of samples per patient
+```{r}
+length(unique(dtt1$co$GRID))
+# 655 subjects have samples
+
+nsamples <- dtt1$co[, .(N = .N),
+                    by = list(Gene,
+                              GRID,
+                              IBD_disease,
+                              TypeRe)]
+
+t1 <- data.table(table(nsamples$Gene,
+                       nsamples$GRID,
+                       nsamples$IBD_disease,
+                       nsamples$TypeRe,
+                       nsamples$N))
+
+t1 <- dcast.data.table(t1,
+                       V1 + V2 + V3 ~ V4,
+                       value.var = "N")
+head(t1)
+
+# All samples have 3 replicates
+sum(t1$`Non-Inflamed` != 3)
+sum(t1$Inflamed != 3)
+
+# Subjects with both, inflamed and non-inflamed samples
+t2 <- t1[Inflamed > 0 & 
+           `Non-Inflamed` > 0,]
+head(t2)
+
+# All 655 subjects have paired samples
+length(unique(t2$V2))
+```
+
+### Add combined level factor
+```{r}
+co <- dtt1$co
+
+co$ibd_infl <- paste(co$IBD_disease,
+                     co$TypeRe,
+                     sep = "_")
+co$ibd_infl <- factor(co$ibd_infl,
+                      levels = c("Control_Non-Inflamed",
+                                 "UC_Non-Inflamed",
+                                 "UC_Inflamed",
+                                 "CD_Non-Inflamed" ,
+                                 "CD_Inflamed"))
+
+gc()
+```
+### Number of batches
+```{r}
+length(unique(co$Extraction_Batch_phase1_and_phase2_UPDATED))
+```
+
+### Split data for parallel processing
+```{r}
+N <- length(unique(co$Gene))
+floor(N/12)
+
+ndx_stop <- c(c(1:11)*floor(N/12),
+              N)
+ndx_start <- c(1,
+               ndx_stop[1:11] + 1)
+
+ndx_start
+ndx_stop  
+```
+
+### Create list
+```{r}
+dtt_co <- list()
+for (i in 1:length(ndx_start)) {
+  dtt_co[[i]] <- co[Gene %in% levels(Gene)[ndx_start[i]:ndx_stop[i]],]
+}
+
+gc()
+```
+
+## NBZIMM/lme
+### Register cores
+```{r}
+cl <- makeCluster(getOption("cl.cores",
+                            detectCores()/2))
+cl
+registerDoParallel(cl)
+```
+
+### Run
+```{r}
+system.time({
+  res22 <- foreach(i = 1:12) %dopar% {
+    require(data.table)
+    require(NBZIMM)
+    tmp <- dtt_co[[i]]
+    
+    tmp[, .(out = list(foo21(logTPM,
+                             ibd_infl,
+                             Extraction_Batch_phase1_and_phase2_UPDATED,
+                             GRID))),
+        by = Gene]
+  }
+})
+
+# user  system elapsed 
+# 8.86   12.03 4752.66  
+```
+
+### Stop the cluster and clean memory
+```{r}
+stopCluster(cl)
+gc()
+```
+
+```{r}
+res22[[1]]$Gene[1:10]
+res22[[1]]$out[[1]]
+```
+
+## Adjusted NBZIMM/lme
+### Register cores
+```{r}
+cl <- makeCluster(getOption("cl.cores",
+                            detectCores()/2))
+cl
+registerDoParallel(cl)
+```
+
+### Run
+```{r}
+system.time({
+  res23 <- foreach(i = 1:12) %dopar% {
+    require(data.table)
+    require(NBZIMM)
+    tmp <- dtt_co[[i]]
+    
+    tmp[, .(out = list(foo31(logTPM,
+                            ibd_infl,
+                            Extraction_Batch_phase1_and_phase2_UPDATED,
+                            GRID_GUAID,
+                            Demographics_race,
+                            Demographics_hispanic,
+                            Demographics_gender,
+                            birth_year,
+                            MedicalHistory_asthma,
+                            MedicalHistory_thyroid_disease,
+                            MedicalHistory_rheumatoid_arthritis,
+                            MedicalHistory_psoriasis,
+                            MedicalHistory_ankylosing_spondylitis,
+                            MedicalHistory_osteopenia_osteoporosis,
+                            MedicalHistory_appendectomy,
+                            MedicalHistory_depression,
+                            MedicalHistory_tobacco,
+                            cancer))),
+        by = Gene]
+  }
+})
+
+# user  system elapsed 
+# 10.35    12.74 23436.02 
+```
+
+### Stop the cluster and clean memory
+```{r}
+stopCluster(cl)
+gc()
+```
+
+```{r}
+res23[[1]]$Gene[1:10]
+res23[[1]]$out[[1]]
+```
+
+## NBZIMM/lme: UC/CD vs Non-Inflamed/Inflamed
+### Register cores
+```{r}
+cl <- makeCluster(getOption("cl.cores",
+                            detectCores()/2))
+cl
+registerDoParallel(cl)
+```
+
+### Run
+```{r}
+system.time({
+  res24 <- foreach(i = 1:12) %dopar% {
+    require(data.table)
+    require(NBZIMM)
+    tmp <- dtt_co[[i]]
+    tmp <- droplevels(tmp[IBD_disease != "Control", ])
+    
+    tmp[, .(out = list(foo22(logTPM,
+                             IBD_disease,
+                             TypeRe,
+                             Extraction_Batch_phase1_and_phase2_UPDATED,
+                             GRID))),
+        by = Gene]
+  }
+})
+
+# user  system elapsed 
+# 11.19    12.83 29691.11  
+```
+
+### Stop the cluster and clean memory
+```{r}
+stopCluster(cl)
+gc()
+```
+
+```{r}
+res24[[1]]$Gene[1:10]
+res24[[1]]$out[[1]]
+```
+
+## Adjusted NBZIMM/lme: UC/CD vs Non-Inflamed/Inflamed
+### Register cores
+```{r}
+cl <- makeCluster(getOption("cl.cores",
+                            detectCores()/2))
+cl
+registerDoParallel(cl)
+```
+
+### Run
+```{r}
+system.time({
+  res25 <- foreach(i = 1:12) %dopar% {
+    require(data.table)
+    require(NBZIMM)
+    tmp <- dtt_co[[i]]
+    tmp <- droplevels(tmp[IBD_disease != "Control", ])
+    
+    tmp[, .(out = list(foo32(logTPM,
+                             IBD_disease,
+                             TypeRe,
+                             Extraction_Batch_phase1_and_phase2_UPDATED,
+                             GRID,
+                             Demographics_race,
+                             Demographics_hispanic,
+                             Demographics_gender,
+                             birth_year,
+                             MedicalHistory_asthma,
+                             MedicalHistory_thyroid_disease,
+                             MedicalHistory_rheumatoid_arthritis,
+                             MedicalHistory_psoriasis,
+                             MedicalHistory_ankylosing_spondylitis,
+                             MedicalHistory_osteopenia_osteoporosis,
+                             MedicalHistory_appendectomy,
+                             MedicalHistory_depression,
+                             MedicalHistory_tobacco,
+                             cancer))),
+        by = Gene]
+  }
+})
+
+# user  system elapsed 
+#  10.94   15.87 4544.62 
+```
+
+### Stop the cluster and clean memory
+```{r}
+stopCluster(cl)
+gc()
+```
+
+```{r}
+res25[[1]]$Gene[1:10]
+res25[[1]]$out[[1]]
+```
+
+## Save Colon models
+```{r}
+save(res22,
+     file = "tmp/res22_co_lme")
+save(res23,
+     file = "tmp/res23_co_lme_adj")
+save(res24,
+     file = "tmp/res24_co_lme")
+save(res25,
+     file = "tmp/res25_co_lme_adj")
+```
+
+# Rectum
+## Data
+### Number of samples per patient
+```{r}
+length(unique(dtt1$re$GRID))
+# 882 subjects have samples
+
+nsamples <- dtt1$re[, .(N = .N),
+                    by = list(Gene,
+                              GRID,
+                              IBD_disease,
+                              TypeRe)]
+
+
+t1 <- data.table(table(nsamples$Gene,
+                       nsamples$GRID,
+                       nsamples$IBD_disease,
+                       nsamples$TypeRe,
+                       nsamples$N))
+
+t1 <- dcast.data.table(t1,
+                       V1 + V2 + V3 ~ V4,
+                       value.var = "N")
+head(t1)
+
+# 623 patients had 1 non-inflamed sample
+sum(t1$`Non-Inflamed` > 0)
+sum(t1$`Non-Inflamed` > 1)
+length(unique(t1$V2[t1$`Non-Inflamed` > 0 &
+                      t1$Inflamed == 0]))
+
+# 245 patients had 1 inflamed sample
+sum(t1$Inflamed > 0)
+sum(t1$Inflamed > 1)
+length(unique(t1$V2[t1$Inflamed > 0 &
+                      t1$`Non-Inflamed` == 0]))
+
+# Subjects with both, inflamed and non-inflamed samples: N= 14
+length(unique(t1$V2[t1$Inflamed > 0 &
+                      t1$`Non-Inflamed` > 0]))
+
+t3 <- t1[Inflamed == 0 & 
+           `Non-Inflamed` == 0,]
+head(t3)
+length(unique(t3$V2))
+```
+
+### Add combined level factor
+```{r}
+re <- dtt1$re
+
+re$ibd_infl <- paste(re$IBD_disease,
+                     re$TypeRe,
+                     sep = "_")
+re$ibd_infl <- factor(re$ibd_infl,
+                      levels = c("Control_Non-Inflamed",
+                                 "UC_Non-Inflamed",
+                                 "UC_Inflamed",
+                                 "CD_Non-Inflamed" ,
+                                 "CD_Inflamed"))
+
+gc()
+```
+
+### Number of batches
+```{r}
+length(unique(re$Extraction_Batch_phase1_and_phase2_UPDATED))
+```
+
+### Split data for parallel processing
+```{r}
+N <- length(unique(re$Gene))
+floor(N/12)
+
+ndx_stop <- c(c(1:11)*floor(N/12),
+              N)
+ndx_start <- c(1,
+               ndx_stop[1:11] + 1)
+
+ndx_start
+ndx_stop  
+```
+
+### Create list
+```{r}
+dtt_re <- list()
+for (i in 1:length(ndx_start)) {
+  dtt_re[[i]] <- re[Gene %in% levels(Gene)[ndx_start[i]:ndx_stop[i]],]
+}
+
+gc()
+```
+
+## NBZIMM/lme
+### Register cores
+```{r}
+cl <- makeCluster(getOption("cl.cores",
+                            detectCores()/2))
+cl
+registerDoParallel(cl)
+```
+
+### Run
+```{r}
+system.time({
+  res32 <- foreach(i = 1:12) %dopar% {
+    require(data.table)
+    require(NBZIMM)
+    tmp <- dtt_re[[i]]
+    
+    tmp[, .(out = list(foo2(logTPM,
+                            ibd_infl,
+                            Extraction_Batch_phase1_and_phase2_UPDATED))),
+        by = Gene]
+  }
+})
+# 
+# user  system elapsed 
+# 9.36   11.64  519.98  
+```
+
+### Stop the cluster and clean memory
+```{r}
+stopCluster(cl)
+gc()
+```
+
+```{r}
+res32[[1]]$Gene[1:10]
+res32[[1]]$out[[1]]
+```
+
+## Adjusted NBZIMM/lme
+### Register cores
+```{r}
+cl <- makeCluster(getOption("cl.cores",
+                            detectCores()/2))
+cl
+registerDoParallel(cl)
+```
+
+### Run
+```{r}
+system.time({
+  res33 <- foreach(i = 1:12) %dopar% {
+    require(data.table)
+    require(NBZIMM)
+    tmp <- dtt_re[[i]]
+    
+    tmp[, .(out = list(foo3(logTPM,
+                            ibd_infl,
+                            Extraction_Batch_phase1_and_phase2_UPDATED,
+                            Demographics_race,
+                            Demographics_hispanic,
+                            Demographics_gender,
+                            birth_year,
+                            MedicalHistory_asthma,
+                            MedicalHistory_thyroid_disease,
+                            MedicalHistory_rheumatoid_arthritis,
+                            MedicalHistory_psoriasis,
+                            MedicalHistory_ankylosing_spondylitis,
+                            MedicalHistory_osteopenia_osteoporosis,
+                            MedicalHistory_appendectomy,
+                            MedicalHistory_depression,
+                            MedicalHistory_tobacco,
+                            cancer))),
+        by = Gene]
+  }
+})
+
+# user  system elapsed 
+# 9.73   12.13 1271.19
+```
+
+### Stop the cluster and clean memory
+```{r}
+stopCluster(cl)
+gc()
+```
+
+```{r}
+res33[[1]]$Gene[1:10]
+res33[[1]]$out[[1]]
+```
+
+## Save Rectum models
+```{r}
+save(res32,
+     file = "tmp/res32_re_lme")
+save(res33,
+     file = "tmp/res33_re_lme_adj")
+```
+
+# PART III: DE lncRNAs
+**RELOAD THE PROJECT**
+# Reload data
+```{r}
+load("Data/dt1l.RData")
+```
+
+# Ileum
+## Load results
+```{r}
+load("Output/results_07182022/res12_il_lme")
+load("Output/results_07182022/res13_il_lme_adj")
+```
+
+## Differentially expressed gene sets
+### Unadjusted
+```{r, warning=FALSE}
+pvals <- list()
+for (i in 1:length(res12)) {
+  out <- list()
+  for (j in 1:length(res12[[i]]$Gene)) {
+    if (!is.na(res12[[i]]$out[[j]][1])) {
+      out[[j]] <- data.table(Gene = res12[[i]]$Gene[j],
+                             grp = rownames(res12[[i]]$out[[j]]$dist)[2:4],
+                             est = res12[[i]]$out[[j]]$dist[2:4, 1],
+                             pval = res12[[i]]$out[[j]]$dist[2:4, 3])
+    }
+  }
+  pvals[[i]] <- rbindlist(out)
+}
+pvals12 <- rbindlist(pvals)
+```
+
+```{r}
+pvals12$adj_pval <- p.adjust(pvals12$pval,
+                            method = "fdr")
+head(pvals12)
+```
+
+### Significant genes
+```{r}
+il_12 <- pvals12[adj_pval < 0.05 &
+                   abs(est) > log(2), ]
+
+nsign12 <- il_12[, .(N_dn = -sum(est < 0),
+                       N_up = sum(est > 0)),
+                   by = grp]
+nsign12
+```
+
+### Adjusted
+```{r, warning=FALSE}
+pvals <- list()
+for (i in 1:length(res13)) {
+  out <- list()
+  for (j in 1:length(res13[[i]]$Gene)) {
+    if (!is.na(res13[[i]]$out[[j]][1])) {
+      out[[j]] <- data.table(Gene = res13[[i]]$Gene[j],
+                             grp = rownames(res13[[i]]$out[[j]]$dist)[2:4],
+                             est = res13[[i]]$out[[j]]$dist[2:4, 1],
+                             pval = res13[[i]]$out[[j]]$dist[2:4, 3])
+    }
+  }
+  pvals[[i]] <- rbindlist(out)
+}
+pvals13 <- rbindlist(pvals)
+```
+
+```{r}
+pvals13$adj_pval <- p.adjust(pvals13$pval,
+                            method = "fdr")
+head(pvals13)
+```
+
+### Significant genes
+```{r}
+il_13 <- pvals13[adj_pval < 0.05 &
+                   abs(est) > log(2), ]
+
+nsign13 <- il_13[, .(N_dn = -sum(est < 0),
+                       N_up = sum(est > 0)),
+                   by = grp]
+nsign13
+```
+
+## Figure
+```{r}
+nsign_il <- rbind(melt.data.table(nsign12),
+                  melt.data.table(nsign13))
+nsign_il <- data.table(Model = factor(rep(c("Unadjusted",
+                                     "Adjusted"),
+                                   each = 6),
+                                   levels = c("Unadjusted",
+                                     "Adjusted")),
+                       nsign_il)
+nsign_il
+```
+
+
+```{r,fig.width=6,fig.height=2}
+p_il <- ggplot(nsign_il,
+              aes(x = value,
+                  y = grp,
+                  fill = grp)) +
+  facet_wrap(~ Model) +
+  geom_bar(stat = "identity",
+           color = "black") +
+  geom_vline(xintercept = 0,
+             linetype = "dashed") +
+  theme_bw() +
+  theme(legend.position = "none")
+p_il
+```
+
+## Gene lists
+### UC_Non-Inflamed
+```{r}
+il_12_uc_ni <- droplevels(il_12[grp == "ibd_inflUC_Non-Inflamed", ])
+
+g_il_uc_ni_unadj_dn <- levels(droplevels(il_12_uc_ni[est < 0, ]$Gene))
+-length(g_il_uc_ni_unadj_dn) 
+g_il_uc_ni_unadj_up <- levels(droplevels(il_12_uc_ni[est > 0, ]$Gene))
+length(g_il_uc_ni_unadj_up) 
+
+il_13_uc_ni <- droplevels(il_13[grp == "ibd_inflUC_Non-Inflamed", ])
+
+g_il_uc_ni_adj_dn <- levels(droplevels(il_13_uc_ni[est < 0, ]$Gene))
+-length(g_il_uc_ni_adj_dn) 
+g_il_uc_ni_adj_up <- levels(droplevels(il_13_uc_ni[est > 0, ]$Gene))
+length(g_il_uc_ni_adj_up)
+
+g_il_uc_ni_unadj_adj_dn <- g_il_uc_ni_unadj_dn[g_il_uc_ni_unadj_dn %in% g_il_uc_ni_adj_dn]
+-length(g_il_uc_ni_unadj_adj_dn)
+g_il_uc_ni_unadj_adj_up <- g_il_uc_ni_unadj_up[g_il_uc_ni_unadj_up %in% g_il_uc_ni_adj_up]
+length(g_il_uc_ni_unadj_adj_up)
+```
+
+#### Tables
+```{r}
+t_g_il_uc_ni_dn <- merge(data.table(g_il_uc_ni_dn = g_il_uc_ni_unadj_dn,
+                                    unadj = 1),
+                         data.table(g_il_uc_ni_dn = g_il_uc_ni_adj_dn,
+                                    adj = 1),
+                         by = "g_il_uc_ni_dn",
+                         all = TRUE)
+write.csv(t_g_il_uc_ni_dn ,
+          file = "tmp/t_g_il_uc_ni_dn.csv",
+          row.names = FALSE)
+t_g_il_uc_ni_dn 
+
+t_g_il_uc_ni_up <- merge(data.table(g_il_uc_ni_up = g_il_uc_ni_unadj_up,
+                                    unadj = 1),
+                         data.table(g_il_uc_ni_up = g_il_uc_ni_adj_up,
+                                    adj = 1),
+                         by = "g_il_uc_ni_up",
+                         all = TRUE)
+write.csv(t_g_il_uc_ni_up ,
+          file = "tmp/t_g_il_uc_ni_up.csv",
+          row.names = FALSE)
+t_g_il_uc_ni_up
+```
+
+#### Venn diagrams
+```{r}
+venn.diagram(x = list(Unadjusted = g_il_uc_ni_unadj_dn,
+                      Adjusted = g_il_uc_ni_adj_dn),
+             col = c("green",
+                     "red"),
+             # alpha = rep(0.5, 2),
+             # compression = "lzw+p",
+             # cat.just = list(c(0, 0),
+             #                 c(1, 0)),
+             main = "Ileum: Downregulated in Non-Inflamed UC\nvs. Non-Inflamed Controls",
+             filename = "tmp/il_uc_ni_dn.tiff",
+             units = 'in',
+             height = 5,
+             width = 5)
+
+venn.diagram(x = list(Unadjusted = g_il_uc_ni_unadj_up,
+                      Adjusted = g_il_uc_ni_adj_up),
+             col = c("green",
+                     "red"),
+             main = "Ileum: Upregulated in Non-Inflamed UC\nvs. Non-Inflamed Controls",
+             filename = "tmp/il_uc_ni_up.tiff",
+             units = 'in',
+             height = 5,
+             width = 5)
+```
+
+### CD_Non-Inflamed
+```{r}
+il_12_cd_ni <- droplevels(il_12[grp == "ibd_inflCD_Non-Inflamed", ])
+
+g_il_cd_ni_unadj_dn <- levels(droplevels(il_12_cd_ni[est < 0, ]$Gene))
+-length(g_il_cd_ni_unadj_dn)
+g_il_cd_ni_unadj_up <- levels(droplevels(il_12_cd_ni[est > 0, ]$Gene))
+length(g_il_cd_ni_unadj_up)
+
+il_13_cd_ni <- droplevels(il_13[grp == "ibd_inflCD_Non-Inflamed", ])
+
+g_il_cd_ni_adj_dn <- levels(droplevels(il_13_cd_ni[est < 0, ]$Gene))
+-length(g_il_cd_ni_adj_dn)
+g_il_cd_ni_adj_up <- levels(droplevels(il_13_cd_ni[est > 0, ]$Gene))
+length(g_il_cd_ni_adj_up)
+
+g_il_cd_ni_unadj_adj_dn <- g_il_cd_ni_unadj_dn[g_il_cd_ni_unadj_dn %in% g_il_cd_ni_adj_dn]
+-length(g_il_cd_ni_unadj_adj_dn)
+g_il_cd_ni_unadj_adj_up <- g_il_cd_ni_unadj_up[g_il_cd_ni_unadj_up %in% g_il_cd_ni_adj_up]
+length(g_il_cd_ni_unadj_adj_up)
+```
+
+#### Tables
+```{r}
+t_g_il_cd_ni_dn <- merge(data.table(g_il_cd_ni_dn = g_il_cd_ni_unadj_dn,
+                                    unadj = 1),
+                         data.table(g_il_cd_ni_dn = g_il_cd_ni_adj_dn,
+                                    adj = 1),
+                         by = "g_il_cd_ni_dn",
+                         all = TRUE)
+write.csv(t_g_il_cd_ni_dn ,
+          file = "tmp/t_g_il_cd_ni_dn.csv",
+          row.names = FALSE)
+head(t_g_il_cd_ni_dn)
+
+t_g_il_cd_ni_up <- merge(data.table(g_il_cd_ni_up = g_il_cd_ni_unadj_up,
+                                    unadj = 1),
+                         data.table(g_il_cd_ni_up = g_il_cd_ni_adj_up,
+                                    adj = 1),
+                         by = "g_il_cd_ni_up",
+                         all = TRUE)
+write.csv(t_g_il_cd_ni_up ,
+          file = "tmp/t_g_il_cd_ni_up.csv",
+          row.names = FALSE)
+t_g_il_cd_ni_up
+```
+
+#### Venn diagrams
+```{r}
+venn.diagram(x = list(Unadjusted = g_il_cd_ni_unadj_dn,
+                      Adjusted = g_il_cd_ni_adj_dn),
+             col = c("green",
+                     "red"),
+             main = "Ileum: Downregulated in Non-Inflamed CD vs.\nNon-Inflamed Controls",
+             filename = "tmp/il_cd_ni_dn.tiff",
+             units = 'in',
+             height = 5,
+             width = 5)
+
+venn.diagram(x = list(Unadjusted = g_il_cd_ni_unadj_up,
+                      Adjusted = g_il_cd_ni_adj_up),
+             col = c("green",
+                     "red"),
+             main = "Ileum: Upregulated in Non-Inflamed CD vs.\nNon-Inflamed Controls",
+             filename = "tmp/il_cd_ni_up.tiff",
+             units = 'in',
+             height = 5,
+             width = 5)
+```
+
+### CD_Inflamed
+```{r}
+il_12_cd_i <- droplevels(il_12[grp == "ibd_inflCD_Inflamed", ])
+
+g_il_cd_i_unadj_dn <- levels(droplevels(il_12_cd_i[est < 0, ]$Gene))
+-length(g_il_cd_i_unadj_dn) 
+g_il_cd_i_unadj_up <- levels(droplevels(il_12_cd_i[est > 0, ]$Gene))
+length(g_il_cd_i_unadj_up) 
+
+il_13_cd_i <- droplevels(il_13[grp == "ibd_inflCD_Inflamed", ])
+
+g_il_cd_i_adj_dn <- levels(droplevels(il_13_cd_i[est < 0, ]$Gene))
+-length(g_il_cd_i_adj_dn)
+g_il_cd_i_adj_up <- levels(droplevels(il_13_cd_i[est > 0, ]$Gene))
+length(g_il_cd_i_adj_up)
+
+g_il_cd_i_unadj_adj_dn <- g_il_cd_i_unadj_dn[g_il_cd_i_unadj_dn %in% g_il_cd_i_adj_dn]
+-length(g_il_cd_i_unadj_adj_dn)
+g_il_cd_i_unadj_adj_up <- g_il_cd_i_unadj_up[g_il_cd_i_unadj_up %in% g_il_cd_i_adj_up]
+length(g_il_cd_i_unadj_adj_up)
+```
+
+#### Tables
+```{r}
+t_g_il_cd_i_dn <- merge(data.table(g_il_cd_i_dn = g_il_cd_i_unadj_dn,
+                                    unadj = 1),
+                         data.table(g_il_cd_i_dn = g_il_cd_i_adj_dn,
+                                    adj = 1),
+                         by = "g_il_cd_i_dn",
+                         all = TRUE)
+write.csv(t_g_il_cd_i_dn ,
+          file = "tmp/t_g_il_cd_i_dn.csv",
+          row.names = FALSE)
+head(t_g_il_cd_i_dn)
+
+t_g_il_cd_i_up <- merge(data.table(g_il_cd_i_up = g_il_cd_i_unadj_up,
+                                    unadj = 1),
+                         data.table(g_il_cd_i_up = g_il_cd_i_adj_up,
+                                    adj = 1),
+                         by = "g_il_cd_i_up",
+                         all = TRUE)
+write.csv(t_g_il_cd_i_up ,
+          file = "tmp/t_g_il_cd_i_up.csv",
+          row.names = FALSE)
+t_g_il_cd_i_up
+```
+
+#### Venn diagrams
+```{r}
+venn.diagram(x = list(Unadjusted = g_il_cd_i_unadj_dn,
+                      Adjusted = g_il_cd_i_adj_dn),
+             col = c("green",
+                     "red"),
+             main = "Ileum: Downregulated in Inflamed CD\n vs. Non-Inflamed Controls",
+             filename = "tmp/il_cd_i_dn.tiff",
+             units = 'in',
+             height = 5,
+             width = 5)
+
+venn.diagram(x = list(Unadjusted = g_il_cd_i_unadj_up,
+                      Adjusted = g_il_cd_i_adj_up),
+             col = c("green",
+                     "red"),
+             main = "Ileum: Upregulated in Inflamed CD\nvs. Non-Inflamed Controls",
+             filename = "tmp/il_cd_i_up.tiff",
+             units = 'in',
+             height = 5,
+             width = 5)
+```
+
+# Column
+## Load results
+```{r}
+load("Output/results_07182022/res22_co_lme")
+load("Output/results_07182022/res23_co_lme_adj")
+```
+
+## Differentially expressed gene sets
+### Unadjusted
+```{r, warning=FALSE}
+pvals <- list()
+for (i in 1:length(res22)) {
+  out <- list()
+  for (j in 1:length(res22[[i]]$Gene)) {
+    if (!is.na(res22[[i]]$out[[j]][1])) {
+      out[[j]] <- data.table(Gene = res22[[i]]$Gene[j],
+                             grp = rownames(res22[[i]]$out[[j]]$dist)[2:5],
+                             est = res22[[i]]$out[[j]]$dist[2:5, 1],
+                             pval = res22[[i]]$out[[j]]$dist[2:5, 3])
+    }
+  }
+  pvals[[i]] <- rbindlist(out)
+}
+pvals22 <- rbindlist(pvals)
+```
+
+```{r}
+pvals22$adj_pval <- p.adjust(pvals22$pval,
+                             method = "fdr")
+head(pvals22)
+```
+
+### Significant genes
+```{r}
+co_22 <- pvals22[adj_pval < 0.05 &
+                   abs(est) > log(2), ]
+
+nsign22 <- co_22[, .(N_dn = -sum(est < 0),
+                     N_up = sum(est > 0)),
+                 by = grp]
+nsign22
+```
+
+### Adjusted
+```{r, warning=FALSE}
+pvals <- list()
+for (i in 1:length(res23)) {
+  out <- list()
+  for (j in 1:length(res23[[i]]$Gene)) {
+    if (!is.na(res23[[i]]$out[[j]][1])) {
+      out[[j]] <- data.table(Gene = res23[[i]]$Gene[j],
+                             grp = rownames(res23[[i]]$out[[j]]$dist)[2:5],
+                             est = res23[[i]]$out[[j]]$dist[2:5, 1],
+                             pval = res23[[i]]$out[[j]]$dist[2:5, 3])
+    }
+  }
+  pvals[[i]] <- rbindlist(out)
+}
+pvals23 <- rbindlist(pvals)
+```
+
+```{r}
+pvals23$adj_pval <- p.adjust(pvals23$pval,
+                             method = "fdr")
+head(pvals23)
+```
+
+### Significant genes
+```{r}
+co_23 <- pvals23[adj_pval < 0.05 &
+                   abs(est) > log(2), ]
+
+nsign23 <- co_23[, .(N_dn = -sum(est < 0),
+                     N_up = sum(est > 0)),
+                 by = grp]
+nsign23
+```
+
+## Figure
+```{r}
+nsign_co <- rbind(melt.data.table(nsign22),
+                  melt.data.table(nsign23))
+nsign_co <- data.table(Model = factor(rep(c("Unadjusted",
+                                            "Adjusted"),
+                                          each = 8),
+                                      levels = c("Unadjusted",
+                                                 "Adjusted")),
+                       nsign_co)
+nsign_co
+```
+
+
+```{r,fig.width=6,fig.height=2}
+p_co <- ggplot(nsign_co,
+               aes(x = value,
+                   y = grp,
+                   fill = grp)) +
+  facet_wrap(~ Model) +
+  geom_bar(stat = "identity",
+           color = "black") +
+  geom_vline(xintercept = 0,
+             linetype = "dashed") +
+  theme_bw() +
+  theme(legend.position = "none")
+p_co
+```
+
+## Gene lists
+### UC_Non-Inflamed
+```{r}
+co_22_uc_ni <- droplevels(co_22[grp == "ibd_inflUC_Non-Inflamed", ])
+
+g_co_uc_ni_unadj_dn <- levels(droplevels(co_22_uc_ni[est < 0, ]$Gene))
+-length(g_co_uc_ni_unadj_dn) 
+g_co_uc_ni_unadj_up <- levels(droplevels(co_22_uc_ni[est > 0, ]$Gene))
+length(g_co_uc_ni_unadj_up) 
+
+co_23_uc_ni <- droplevels(co_23[grp == "ibd_inflUC_Non-Inflamed", ])
+
+g_co_uc_ni_adj_dn <- levels(droplevels(co_23_uc_ni[est < 0, ]$Gene))
+-length(g_co_uc_ni_adj_dn) 
+g_co_uc_ni_adj_up <- levels(droplevels(co_23_uc_ni[est > 0, ]$Gene))
+length(g_co_uc_ni_adj_up)
+
+g_co_uc_ni_unadj_adj_dn <- g_co_uc_ni_unadj_dn[g_co_uc_ni_unadj_dn %in% g_co_uc_ni_adj_dn]
+-length(g_co_uc_ni_unadj_adj_dn)
+g_co_uc_ni_unadj_adj_up <- g_co_uc_ni_unadj_up[g_co_uc_ni_unadj_up %in% g_co_uc_ni_adj_up]
+length(g_co_uc_ni_unadj_adj_up)
+```
+
+#### Tables
+```{r}
+t_g_co_uc_ni_dn <- merge(data.table(g_co_uc_ni_dn = g_co_uc_ni_unadj_dn,
+                                    unadj = 1),
+                         data.table(g_co_uc_ni_dn = g_co_uc_ni_adj_dn,
+                                    adj = 1),
+                         by = "g_co_uc_ni_dn",
+                         all = TRUE)
+write.csv(t_g_co_uc_ni_dn ,
+          file = "tmp/t_g_co_uc_ni_dn.csv",
+          row.names = FALSE)
+t_g_co_uc_ni_dn 
+
+t_g_co_uc_ni_up <- merge(data.table(g_co_uc_ni_up = g_co_uc_ni_unadj_up,
+                                    unadj = 1),
+                         data.table(g_co_uc_ni_up = g_co_uc_ni_adj_up,
+                                    adj = 1),
+                         by = "g_co_uc_ni_up",
+                         all = TRUE)
+write.csv(t_g_co_uc_ni_up ,
+          file = "tmp/t_g_co_uc_ni_up.csv",
+          row.names = FALSE)
+t_g_co_uc_ni_up
+```
+
+#### Venn diagrams
+```{r}
+venn.diagram(x = list(Unadjusted = g_co_uc_ni_unadj_dn,
+                      Adjusted = g_co_uc_ni_adj_dn),
+             col = c("green",
+                     "red"),
+             main = "Rectum: Downregulated in Non-Inflamed UC\nvs. Non-Inflamed Controls",
+             filename = "tmp/co_uc_ni_dn.tiff",
+             units = 'in',
+             height = 5,
+             width = 5)
+
+venn.diagram(x = list(Unadjusted = g_co_uc_ni_unadj_up,
+                      Adjusted = g_co_uc_ni_adj_up),
+             col = c("green",
+                     "red"),
+             main = "Rectum: Upregulated in Non-Inflamed UC\nvs. Non-Inflamed Controls",
+             filename = "tmp/co_uc_ni_up.tiff",
+             units = 'in',
+             height = 5,
+             width = 5)
+```
+
+### CD_Non-Inflamed
+```{r}
+co_22_cd_ni <- droplevels(co_22[grp == "ibd_inflCD_Non-Inflamed", ])
+
+g_co_cd_ni_unadj_dn <- levels(droplevels(co_22_cd_ni[est < 0, ]$Gene))
+-length(g_co_cd_ni_unadj_dn)
+g_co_cd_ni_unadj_up <- levels(droplevels(co_22_cd_ni[est > 0, ]$Gene))
+length(g_co_cd_ni_unadj_up)
+
+co_23_cd_ni <- droplevels(co_23[grp == "ibd_inflCD_Non-Inflamed", ])
+
+g_co_cd_ni_adj_dn <- levels(droplevels(co_23_cd_ni[est < 0, ]$Gene))
+-length(g_co_cd_ni_adj_dn)
+g_co_cd_ni_adj_up <- levels(droplevels(co_23_cd_ni[est > 0, ]$Gene))
+length(g_co_cd_ni_adj_up)
+
+g_co_cd_ni_unadj_adj_dn <- g_co_cd_ni_unadj_dn[g_co_cd_ni_unadj_dn %in% g_co_cd_ni_adj_dn]
+-length(g_co_cd_ni_unadj_adj_dn)
+g_co_cd_ni_unadj_adj_up <- g_co_cd_ni_unadj_up[g_co_cd_ni_unadj_up %in% g_co_cd_ni_adj_up]
+length(g_co_cd_ni_unadj_adj_up)
+```
+
+#### Tables
+```{r}
+t_g_co_cd_ni_dn <- merge(data.table(g_co_cd_ni_dn = g_co_cd_ni_unadj_dn,
+                                    unadj = 1),
+                         data.table(g_co_cd_ni_dn = g_co_cd_ni_adj_dn,
+                                    adj = 1),
+                         by = "g_co_cd_ni_dn",
+                         all = TRUE)
+write.csv(t_g_co_cd_ni_dn ,
+          file = "tmp/t_g_co_cd_ni_dn.csv",
+          row.names = FALSE)
+head(t_g_co_cd_ni_dn)
+
+t_g_co_cd_ni_up <- merge(data.table(g_co_cd_ni_up = g_co_cd_ni_unadj_up,
+                                    unadj = 1),
+                         data.table(g_co_cd_ni_up = g_co_cd_ni_adj_up,
+                                    adj = 1),
+                         by = "g_co_cd_ni_up",
+                         all = TRUE)
+write.csv(t_g_co_cd_ni_up ,
+          file = "tmp/t_g_co_cd_ni_up.csv",
+          row.names = FALSE)
+t_g_co_cd_ni_up
+```
+
+#### Venn diagrams
+```{r}
+venn.diagram(x = list(Unadjusted = g_co_cd_ni_unadj_dn,
+                      Adjusted = g_co_cd_ni_adj_dn),
+             col = c("green",
+                     "red"),
+             main = "Rectum: Downregulated in Non-Inflamed CD\nvs. Non-Inflamed Controls",
+             filename = "tmp/co_cd_ni_dn.tiff",
+             units = 'in',
+             height = 5,
+             width = 5)
+
+venn.diagram(x = list(Unadjusted = g_co_cd_ni_unadj_up,
+                      Adjusted = g_co_cd_ni_adj_up),
+             col = c("green",
+                     "red"),
+             main = "Rectum: Upregulated in Non-Inflamed CD\nvs. Non-Inflamed Controls",
+             filename = "tmp/co_cd_ni_up.tiff",
+             units = 'in',
+             height = 5,
+             width = 5)
+```
+### UC_Inflamed
+```{r}
+co_22_uc_i <- droplevels(co_22[grp == "ibd_inflUC_Inflamed", ])
+
+g_co_uc_i_unadj_dn <- levels(droplevels(co_22_uc_i[est < 0, ]$Gene))
+-length(g_co_uc_i_unadj_dn) 
+g_co_uc_i_unadj_up <- levels(droplevels(co_22_uc_i[est > 0, ]$Gene))
+length(g_co_uc_i_unadj_up) 
+
+co_23_uc_i <- droplevels(co_23[grp == "ibd_inflUC_Inflamed", ])
+
+g_co_uc_i_adj_dn <- levels(droplevels(co_23_uc_i[est < 0, ]$Gene))
+-length(g_co_uc_i_adj_dn) 
+g_co_uc_i_adj_up <- levels(droplevels(co_23_uc_i[est > 0, ]$Gene))
+length(g_co_uc_i_adj_up)
+
+g_co_uc_i_unadj_adj_dn <- g_co_uc_i_unadj_dn[g_co_uc_i_unadj_dn %in% g_co_uc_i_adj_dn]
+-length(g_co_uc_i_unadj_adj_dn)
+g_co_uc_i_unadj_adj_up <- g_co_uc_i_unadj_up[g_co_uc_i_unadj_up %in% g_co_uc_i_adj_up]
+length(g_co_uc_i_unadj_adj_up)
+```
+
+#### Tables
+```{r}
+t_g_co_uc_i_dn <- merge(data.table(g_co_uc_i_dn = g_co_uc_i_unadj_dn,
+                                   unadj = 1),
+                        data.table(g_co_uc_i_dn = g_co_uc_i_adj_dn,
+                                   adj = 1),
+                        by = "g_co_uc_i_dn",
+                        all = TRUE)
+write.csv(t_g_co_uc_i_dn ,
+          file = "tmp/t_g_co_uc_i_dn.csv",
+          row.names = FALSE)
+t_g_co_uc_i_dn 
+
+t_g_co_uc_i_up <- merge(data.table(g_co_uc_i_up = g_co_uc_i_unadj_up,
+                                   unadj = 1),
+                        data.table(g_co_uc_i_up = g_co_uc_i_adj_up,
+                                   adj = 1),
+                        by = "g_co_uc_i_up",
+                        all = TRUE)
+write.csv(t_g_co_uc_i_up ,
+          file = "tmp/t_g_co_uc_i_up.csv",
+          row.names = FALSE)
+t_g_co_uc_i_up
+```
+
+#### Venn diagrams
+```{r}
+venn.diagram(x = list(Unadjusted = g_co_uc_i_unadj_dn,
+                      Adjusted = g_co_uc_i_adj_dn),
+             col = c("green",
+                     "red"),
+             main = "Rectum: Downregulated in Non-Inflamed UC\nvs. Non-Inflamed Controls",
+             filename = "tmp/co_uc_i_dn.tiff",
+             units = 'in',
+             height = 5,
+             width = 5)
+
+venn.diagram(x = list(Unadjusted = g_co_uc_i_unadj_up,
+                      Adjusted = g_co_uc_i_adj_up),
+             col = c("green",
+                     "red"),
+             main = "Rectum: Upregulated in Non-Inflamed UC\nvs. Non-Inflamed Controls",
+             filename = "tmp/co_uc_i_up.tiff",
+             units = 'in',
+             height = 5,
+             width = 5)
+```
+
+### CD_Inflamed
+```{r}
+co_22_cd_i <- droplevels(co_22[grp == "ibd_inflCD_Inflamed", ])
+
+g_co_cd_i_unadj_dn <- levels(droplevels(co_22_cd_i[est < 0, ]$Gene))
+-length(g_co_cd_i_unadj_dn) 
+g_co_cd_i_unadj_up <- levels(droplevels(co_22_cd_i[est > 0, ]$Gene))
+length(g_co_cd_i_unadj_up) 
+
+co_23_cd_i <- droplevels(co_23[grp == "ibd_inflCD_Inflamed", ])
+
+g_co_cd_i_adj_dn <- levels(droplevels(co_23_cd_i[est < 0, ]$Gene))
+-length(g_co_cd_i_adj_dn)
+g_co_cd_i_adj_up <- levels(droplevels(co_23_cd_i[est > 0, ]$Gene))
+length(g_co_cd_i_adj_up)
+
+g_co_cd_i_unadj_adj_dn <- g_co_cd_i_unadj_dn[g_co_cd_i_unadj_dn %in% g_co_cd_i_adj_dn]
+-length(g_co_cd_i_unadj_adj_dn)
+g_co_cd_i_unadj_adj_up <- g_co_cd_i_unadj_up[g_co_cd_i_unadj_up %in% g_co_cd_i_adj_up]
+length(g_co_cd_i_unadj_adj_up)
+```
+
+#### Tables
+```{r}
+t_g_co_cd_i_dn <- merge(data.table(g_co_cd_i_dn = g_co_cd_i_unadj_dn,
+                                   unadj = 1),
+                        data.table(g_co_cd_i_dn = g_co_cd_i_adj_dn,
+                                   adj = 1),
+                        by = "g_co_cd_i_dn",
+                        all = TRUE)
+write.csv(t_g_co_cd_i_dn ,
+          file = "tmp/t_g_co_cd_i_dn.csv",
+          row.names = FALSE)
+head(t_g_co_cd_i_dn)
+
+t_g_co_cd_i_up <- merge(data.table(g_co_cd_i_up = g_co_cd_i_unadj_up,
+                                   unadj = 1),
+                        data.table(g_co_cd_i_up = g_co_cd_i_adj_up,
+                                   adj = 1),
+                        by = "g_co_cd_i_up",
+                        all = TRUE)
+write.csv(t_g_co_cd_i_up ,
+          file = "tmp/t_g_co_cd_i_up.csv",
+          row.names = FALSE)
+t_g_co_cd_i_up
+```
+
+#### Venn diagrams
+```{r}
+venn.diagram(x = list(Unadjusted = g_co_cd_i_unadj_dn,
+                      Adjusted = g_co_cd_i_adj_dn),
+             col = c("green",
+                     "red"),
+             main = "Rectum: Downregulated in Inflamed CD\n vs. Non-Inflamed Controls",
+             filename = "tmp/co_cd_i_dn.tiff",
+             units = 'in',
+             height = 5,
+             width = 5)
+
+venn.diagram(x = list(Unadjusted = g_co_cd_i_unadj_up,
+                      Adjusted = g_co_cd_i_adj_up),
+             col = c("green",
+                     "red"),
+             main = "Rectum: Upregulated in Inflamed CD\nvs. Non-Inflamed Controls",
+             filename = "tmp/co_cd_i_up.tiff",
+             units = 'in',
+             height = 5,
+             width = 5)
+```
+
+# Rectum
+## Load results
+```{r}
+load("Output/results_07182022/res32_re_lme")
+load("Output/results_07182022/res33_re_lme_adj")
+```
+
+## Differentially expressed gene sets
+### Unadjusted
+```{r, warning=FALSE}
+pvals <- list()
+for (i in 1:length(res32)) {
+  out <- list()
+  for (j in 1:length(res32[[i]]$Gene)) {
+    if (!is.na(res32[[i]]$out[[j]][1])) {
+      out[[j]] <- data.table(Gene = res32[[i]]$Gene[j],
+                             grp = rownames(res32[[i]]$out[[j]]$dist)[2:5],
+                             est = res32[[i]]$out[[j]]$dist[2:5, 1],
+                             pval = res32[[i]]$out[[j]]$dist[2:5, 3])
+    }
+  }
+  pvals[[i]] <- rbindlist(out)
+}
+pvals32 <- rbindlist(pvals)
+```
+
+```{r}
+pvals32$adj_pval <- p.adjust(pvals32$pval,
+                             method = "fdr")
+head(pvals32)
+```
+
+### Significant genes
+```{r}
+re_32 <- pvals32[adj_pval < 0.05 &
+                   abs(est) > log(2), ]
+
+nsign32 <- re_32[, .(N_dn = -sum(est < 0),
+                     N_up = sum(est > 0)),
+                 by = grp]
+nsign32
+```
+
+### Adjusted
+```{r, warning=FALSE}
+pvals <- list()
+for (i in 1:length(res33)) {
+  out <- list()
+  for (j in 1:length(res33[[i]]$Gene)) {
+    if (!is.na(res33[[i]]$out[[j]][1])) {
+      out[[j]] <- data.table(Gene = res33[[i]]$Gene[j],
+                             grp = rownames(res33[[i]]$out[[j]]$dist)[2:5],
+                             est = res33[[i]]$out[[j]]$dist[2:5, 1],
+                             pval = res33[[i]]$out[[j]]$dist[2:5, 3])
+    }
+  }
+  pvals[[i]] <- rbindlist(out)
+}
+pvals33 <- rbindlist(pvals)
+```
+
+```{r}
+pvals33$adj_pval <- p.adjust(pvals33$pval,
+                             method = "fdr")
+head(pvals33)
+```
+
+### Significant genes
+```{r}
+re_33 <- pvals33[adj_pval < 0.05 &
+                   abs(est) > log(2), ]
+
+nsign33 <- re_33[, .(N_dn = -sum(est < 0),
+                     N_up = sum(est > 0)),
+                 by = grp]
+nsign33
+```
+
+## Figure
+```{r}
+nsign_re <- rbind(melt.data.table(nsign32),
+                  melt.data.table(nsign33))
+nsign_re <- data.table(Model = factor(rep(c("Unadjusted",
+                                            "Adjusted"),
+                                          each = 8),
+                                      levels = c("Unadjusted",
+                                                 "Adjusted")),
+                       nsign_re)
+nsign_re
+```
+
+
+```{r,fig.width=6,fig.height=2}
+p_re <- ggplot(nsign_re,
+               aes(x = value,
+                   y = grp,
+                   fill = grp)) +
+  facet_wrap(~ Model) +
+  geom_bar(stat = "identity",
+           color = "black") +
+  geom_vline(xintercept = 0,
+             linetype = "dashed") +
+  theme_bw() +
+  theme(legend.position = "none")
+p_re
+```
+
+## Gene lists
+### UC_Non-Inflamed
+```{r}
+re_32_uc_ni <- droplevels(re_32[grp == "ibd_inflUC_Non-Inflamed", ])
+
+g_re_uc_ni_unadj_dn <- levels(droplevels(re_32_uc_ni[est < 0, ]$Gene))
+-length(g_re_uc_ni_unadj_dn) 
+g_re_uc_ni_unadj_up <- levels(droplevels(re_32_uc_ni[est > 0, ]$Gene))
+length(g_re_uc_ni_unadj_up) 
+
+re_33_uc_ni <- droplevels(re_33[grp == "ibd_inflUC_Non-Inflamed", ])
+
+g_re_uc_ni_adj_dn <- levels(droplevels(re_33_uc_ni[est < 0, ]$Gene))
+-length(g_re_uc_ni_adj_dn) 
+g_re_uc_ni_adj_up <- levels(droplevels(re_33_uc_ni[est > 0, ]$Gene))
+length(g_re_uc_ni_adj_up)
+
+g_re_uc_ni_unadj_adj_dn <- g_re_uc_ni_unadj_dn[g_re_uc_ni_unadj_dn %in% g_re_uc_ni_adj_dn]
+-length(g_re_uc_ni_unadj_adj_dn)
+g_re_uc_ni_unadj_adj_up <- g_re_uc_ni_unadj_up[g_re_uc_ni_unadj_up %in% g_re_uc_ni_adj_up]
+length(g_re_uc_ni_unadj_adj_up)
+```
+
+#### Tables
+```{r}
+t_g_re_uc_ni_dn <- merge(data.table(g_re_uc_ni_dn = g_re_uc_ni_unadj_dn,
+                                    unadj = 1),
+                         data.table(g_re_uc_ni_dn = g_re_uc_ni_adj_dn,
+                                    adj = 1),
+                         by = "g_re_uc_ni_dn",
+                         all = TRUE)
+write.csv(t_g_re_uc_ni_dn ,
+          file = "tmp/t_g_re_uc_ni_dn.csv",
+          row.names = FALSE)
+t_g_re_uc_ni_dn 
+
+t_g_re_uc_ni_up <- merge(data.table(g_re_uc_ni_up = g_re_uc_ni_unadj_up,
+                                    unadj = 1),
+                         data.table(g_re_uc_ni_up = g_re_uc_ni_adj_up,
+                                    adj = 1),
+                         by = "g_re_uc_ni_up",
+                         all = TRUE)
+write.csv(t_g_re_uc_ni_up ,
+          file = "tmp/t_g_re_uc_ni_up.csv",
+          row.names = FALSE)
+t_g_re_uc_ni_up
+```
+
+#### Venn diagrams
+```{r}
+venn.diagram(x = list(Unadjusted = g_re_uc_ni_unadj_dn,
+                      Adjusted = g_re_uc_ni_adj_dn),
+             col = c("green",
+                     "red"),
+             main = "Rectum: Downregulated in Non-Inflamed UC\nvs. Non-Inflamed Controls",
+             filename = "tmp/re_uc_ni_dn.tiff",
+             units = 'in',
+             height = 5,
+             width = 5)
+
+venn.diagram(x = list(Unadjusted = g_re_uc_ni_unadj_up,
+                      Adjusted = g_re_uc_ni_adj_up),
+             col = c("green",
+                     "red"),
+             main = "Rectum: Upregulated in Non-Inflamed UC\nvs. Non-Inflamed Controls",
+             filename = "tmp/re_uc_ni_up.tiff",
+             units = 'in',
+             height = 5,
+             width = 5)
+```
+
+### CD_Non-Inflamed
+```{r}
+re_32_cd_ni <- droplevels(re_32[grp == "ibd_inflCD_Non-Inflamed", ])
+
+g_re_cd_ni_unadj_dn <- levels(droplevels(re_32_cd_ni[est < 0, ]$Gene))
+-length(g_re_cd_ni_unadj_dn)
+g_re_cd_ni_unadj_up <- levels(droplevels(re_32_cd_ni[est > 0, ]$Gene))
+length(g_re_cd_ni_unadj_up)
+
+re_33_cd_ni <- droplevels(re_33[grp == "ibd_inflCD_Non-Inflamed", ])
+
+g_re_cd_ni_adj_dn <- levels(droplevels(re_33_cd_ni[est < 0, ]$Gene))
+-length(g_re_cd_ni_adj_dn)
+g_re_cd_ni_adj_up <- levels(droplevels(re_33_cd_ni[est > 0, ]$Gene))
+length(g_re_cd_ni_adj_up)
+
+g_re_cd_ni_unadj_adj_dn <- g_re_cd_ni_unadj_dn[g_re_cd_ni_unadj_dn %in% g_re_cd_ni_adj_dn]
+-length(g_re_cd_ni_unadj_adj_dn)
+g_re_cd_ni_unadj_adj_up <- g_re_cd_ni_unadj_up[g_re_cd_ni_unadj_up %in% g_re_cd_ni_adj_up]
+length(g_re_cd_ni_unadj_adj_up)
+```
+
+#### Tables
+```{r}
+t_g_re_cd_ni_dn <- merge(data.table(g_re_cd_ni_dn = g_re_cd_ni_unadj_dn,
+                                    unadj = 1),
+                         data.table(g_re_cd_ni_dn = g_re_cd_ni_adj_dn,
+                                    adj = 1),
+                         by = "g_re_cd_ni_dn",
+                         all = TRUE)
+write.csv(t_g_re_cd_ni_dn ,
+          file = "tmp/t_g_re_cd_ni_dn.csv",
+          row.names = FALSE)
+head(t_g_re_cd_ni_dn)
+
+t_g_re_cd_ni_up <- merge(data.table(g_re_cd_ni_up = g_re_cd_ni_unadj_up,
+                                    unadj = 1),
+                         data.table(g_re_cd_ni_up = g_re_cd_ni_adj_up,
+                                    adj = 1),
+                         by = "g_re_cd_ni_up",
+                         all = TRUE)
+write.csv(t_g_re_cd_ni_up ,
+          file = "tmp/t_g_re_cd_ni_up.csv",
+          row.names = FALSE)
+t_g_re_cd_ni_up
+```
+
+#### Venn diagrams
+```{r}
+venn.diagram(x = list(Unadjusted = g_re_cd_ni_unadj_dn,
+                      Adjusted = g_re_cd_ni_adj_dn),
+             col = c("green",
+                     "red"),
+             main = "Rectum: Downregulated in Non-Inflamed CD\nvs. Non-Inflamed Controls",
+             filename = "tmp/re_cd_ni_dn.tiff",
+             units = 'in',
+             height = 5,
+             width = 5)
+
+venn.diagram(x = list(Unadjusted = g_re_cd_ni_unadj_up,
+                      Adjusted = g_re_cd_ni_adj_up),
+             col = c("green",
+                     "red"),
+             main = "Rectum: Upregulated in Non-Inflamed CD\nvs. Non-Inflamed Controls",
+             filename = "tmp/re_cd_ni_up.tiff",
+             units = 'in',
+             height = 5,
+             width = 5)
+```
+### UC_Inflamed
+```{r}
+re_32_uc_i <- droplevels(re_32[grp == "ibd_inflUC_Inflamed", ])
+
+g_re_uc_i_unadj_dn <- levels(droplevels(re_32_uc_i[est < 0, ]$Gene))
+-length(g_re_uc_i_unadj_dn) 
+g_re_uc_i_unadj_up <- levels(droplevels(re_32_uc_i[est > 0, ]$Gene))
+length(g_re_uc_i_unadj_up) 
+
+re_33_uc_i <- droplevels(re_33[grp == "ibd_inflUC_Inflamed", ])
+
+g_re_uc_i_adj_dn <- levels(droplevels(re_33_uc_i[est < 0, ]$Gene))
+-length(g_re_uc_i_adj_dn) 
+g_re_uc_i_adj_up <- levels(droplevels(re_33_uc_i[est > 0, ]$Gene))
+length(g_re_uc_i_adj_up)
+
+g_re_uc_i_unadj_adj_dn <- g_re_uc_i_unadj_dn[g_re_uc_i_unadj_dn %in% g_re_uc_i_adj_dn]
+-length(g_re_uc_i_unadj_adj_dn)
+g_re_uc_i_unadj_adj_up <- g_re_uc_i_unadj_up[g_re_uc_i_unadj_up %in% g_re_uc_i_adj_up]
+length(g_re_uc_i_unadj_adj_up)
+```
+
+#### Tables
+```{r}
+t_g_re_uc_i_dn <- merge(data.table(g_re_uc_i_dn = g_re_uc_i_unadj_dn,
+                                    unadj = 1),
+                         data.table(g_re_uc_i_dn = g_re_uc_i_adj_dn,
+                                    adj = 1),
+                         by = "g_re_uc_i_dn",
+                         all = TRUE)
+write.csv(t_g_re_uc_i_dn ,
+          file = "tmp/t_g_re_uc_i_dn.csv",
+          row.names = FALSE)
+t_g_re_uc_i_dn 
+
+t_g_re_uc_i_up <- merge(data.table(g_re_uc_i_up = g_re_uc_i_unadj_up,
+                                    unadj = 1),
+                         data.table(g_re_uc_i_up = g_re_uc_i_adj_up,
+                                    adj = 1),
+                         by = "g_re_uc_i_up",
+                         all = TRUE)
+write.csv(t_g_re_uc_i_up ,
+          file = "tmp/t_g_re_uc_i_up.csv",
+          row.names = FALSE)
+t_g_re_uc_i_up
+```
+
+#### Venn diagrams
+```{r}
+venn.diagram(x = list(Unadjusted = g_re_uc_i_unadj_dn,
+                      Adjusted = g_re_uc_i_adj_dn),
+             col = c("green",
+                     "red"),
+             main = "Rectum: Downregulated in Non-Inflamed UC\nvs. Non-Inflamed Controls",
+             filename = "tmp/re_uc_i_dn.tiff",
+             units = 'in',
+             height = 5,
+             width = 5)
+
+venn.diagram(x = list(Unadjusted = g_re_uc_i_unadj_up,
+                      Adjusted = g_re_uc_i_adj_up),
+             col = c("green",
+                     "red"),
+             main = "Rectum: Upregulated in Non-Inflamed UC\nvs. Non-Inflamed Controls",
+             filename = "tmp/re_uc_i_up.tiff",
+             units = 'in',
+             height = 5,
+             width = 5)
+```
+
+### CD_Inflamed
+```{r}
+re_32_cd_i <- droplevels(re_32[grp == "ibd_inflCD_Inflamed", ])
+
+g_re_cd_i_unadj_dn <- levels(droplevels(re_32_cd_i[est < 0, ]$Gene))
+-length(g_re_cd_i_unadj_dn) 
+g_re_cd_i_unadj_up <- levels(droplevels(re_32_cd_i[est > 0, ]$Gene))
+length(g_re_cd_i_unadj_up) 
+
+re_33_cd_i <- droplevels(re_33[grp == "ibd_inflCD_Inflamed", ])
+
+g_re_cd_i_adj_dn <- levels(droplevels(re_33_cd_i[est < 0, ]$Gene))
+-length(g_re_cd_i_adj_dn)
+g_re_cd_i_adj_up <- levels(droplevels(re_33_cd_i[est > 0, ]$Gene))
+length(g_re_cd_i_adj_up)
+
+g_re_cd_i_unadj_adj_dn <- g_re_cd_i_unadj_dn[g_re_cd_i_unadj_dn %in% g_re_cd_i_adj_dn]
+-length(g_re_cd_i_unadj_adj_dn)
+g_re_cd_i_unadj_adj_up <- g_re_cd_i_unadj_up[g_re_cd_i_unadj_up %in% g_re_cd_i_adj_up]
+length(g_re_cd_i_unadj_adj_up)
+```
+
+#### Tables
+```{r}
+t_g_re_cd_i_dn <- merge(data.table(g_re_cd_i_dn = g_re_cd_i_unadj_dn,
+                                    unadj = 1),
+                         data.table(g_re_cd_i_dn = g_re_cd_i_adj_dn,
+                                    adj = 1),
+                         by = "g_re_cd_i_dn",
+                         all = TRUE)
+write.csv(t_g_re_cd_i_dn ,
+          file = "tmp/t_g_re_cd_i_dn.csv",
+          row.names = FALSE)
+head(t_g_re_cd_i_dn)
+
+t_g_re_cd_i_up <- merge(data.table(g_re_cd_i_up = g_re_cd_i_unadj_up,
+                                    unadj = 1),
+                         data.table(g_re_cd_i_up = g_re_cd_i_adj_up,
+                                    adj = 1),
+                         by = "g_re_cd_i_up",
+                         all = TRUE)
+write.csv(t_g_re_cd_i_up ,
+          file = "tmp/t_g_re_cd_i_up.csv",
+          row.names = FALSE)
+t_g_re_cd_i_up
+```
+
+#### Venn diagrams
+```{r}
+venn.diagram(x = list(Unadjusted = g_re_cd_i_unadj_dn,
+                      Adjusted = g_re_cd_i_adj_dn),
+             col = c("green",
+                     "red"),
+             main = "Rectum: Downregulated in Inflamed CD\n vs. Non-Inflamed Controls",
+             filename = "tmp/re_cd_i_dn.tiff",
+             units = 'in',
+             height = 5,
+             width = 5)
+
+venn.diagram(x = list(Unadjusted = g_re_cd_i_unadj_up,
+                      Adjusted = g_re_cd_i_adj_up),
+             col = c("green",
+                     "red"),
+             main = "Rectum: Upregulated in Inflamed CD\nvs. Non-Inflamed Controls",
+             filename = "tmp/re_cd_i_up.tiff",
+             units = 'in',
+             height = 5,
+             width = 5)
+```
+
+# Combined
+## Data
+```{r}
+gsign <- rbind(data.table(Location = "Ileum",
+                          nsign_il),
+               data.table(Location = "Colon",
+                          nsign_co),
+               data.table(Location = "Rectum",
+                          nsign_re))
+
+gsign$Location <- factor(gsign$Location,
+                         levels = c("Ileum",
+                                    "Colon",
+                                    "Rectum"))
+gsign$Comparison <- factor(gsign$grp,
+                           levels = c("ibd_inflCD_Inflamed",
+                                      "ibd_inflCD_Non-Inflamed",
+                                      "ibd_inflUC_Inflamed",
+                                      "ibd_inflUC_Non-Inflamed"),
+                           labels = c("Inflamed CD vs. Control",
+                                      "Non-Inflamed CD vs. Control",
+                                      "Inflamed UC vs. Control",
+                                      "Non-Inflamed UC vs. Control"))
+gsign
+```
+
+## Figure
+```{r,fig.width=10,fig.height=4}
+fig1 <- ggplot(gsign,
+               aes(x = value,
+                   y = Comparison,
+                   fill = Comparison)) +
+  facet_grid(Location ~ Model) +
+  geom_bar(stat = "identity",
+           color = "black") +
+  geom_vline(xintercept = 0,
+             linetype = "dashed") +
+  scale_x_continuous("Number of differentially expressed lncRNAs",
+                     breaks = seq(-1000,
+                                  300,
+                                  by = 100)) +
+  scale_y_discrete("") +
+  theme_bw() +
+  theme(legend.position = "none")
+
+tiff(filename = "tmp/fig1.tiff",
+     height = 4,
+     width = 10,
+     units = 'in',
+     res = 600,
+     compression = "lzw+p")
+print(fig1)
+graphics.off()
+
+pdf(file = "tmp/fig1.pdf",
+     height = 4,
+     width = 10)
+print(fig1)
+dev.off()
+
+fig1
+```
+
+# Colon: UC vs. CD/ Non-Inflamed vs. Inflamed
+## Load results
+```{r}
+load("Output/results_07182022/res24_co_lme")
+load("Output/results_07182022/res25_co_lme_adj")
+```
+
+## Differentially expressed gene sets
+### Unadjusted
+```{r, warning=FALSE}
+pvals <- list()
+for (i in 1:length(res24)) {
+  out <- list()
+  for (j in 1:length(res24[[i]]$Gene)) {
+    if (!is.na(res24[[i]]$out[[j]][1])) {
+      out[[j]] <- data.table(Gene = res24[[i]]$Gene[j],
+                             grp = rownames(res24[[i]]$out[[j]]$dist)[2:3],
+                             est = res24[[i]]$out[[j]]$dist[2:3, 1],
+                             pval = res24[[i]]$out[[j]]$dist[2:3, 3])
+    }
+  }
+  pvals[[i]] <- rbindlist(out)
+}
+pvals24 <- rbindlist(pvals)
+```
+
+```{r}
+pvals24$adj_pval <- p.adjust(pvals24$pval,
+                             method = "fdr")
+head(pvals24)
+```
+
+### Significant genes
+```{r}
+co_24 <- pvals24[adj_pval < 0.05 &
+                   abs(est) > log(2), ]
+
+nsign24 <- co_24[, .(N_dn = -sum(est < 0),
+                     N_up = sum(est > 0)),
+                 by = grp]
+nsign24
+```
+
+### Adjusted
+```{r, warning=FALSE}
+pvals <- list()
+for (i in 1:length(res25)) {
+  out <- list()
+  for (j in 1:length(res25[[i]]$Gene)) {
+    if (!is.na(res25[[i]]$out[[j]][1])) {
+      out[[j]] <- data.table(Gene = res25[[i]]$Gene[j],
+                             grp = rownames(res25[[i]]$out[[j]]$dist)[2:3],
+                             est = res25[[i]]$out[[j]]$dist[2:3, 1],
+                             pval = res25[[i]]$out[[j]]$dist[2:3, 3])
+    }
+  }
+  pvals[[i]] <- rbindlist(out)
+}
+pvals25 <- rbindlist(pvals)
+```
+
+```{r}
+pvals25$adj_pval <- p.adjust(pvals25$pval,
+                             method = "fdr")
+head(pvals25)
+```
+
+### Significant genes
+```{r}
+co_25 <- pvals25[adj_pval < 0.05 &
+                   abs(est) > log(2), ]
+
+nsign25 <- co_25[, .(N_dn = -sum(est < 0),
+                     N_up = sum(est > 0)),
+                 by = grp]
+nsign25
+```
+
+## Gene lists
+### UC vs CD and Non-Inflamed vs. Inflamed
+```{r}
+# Unadjusted
+## Inflammation
+co_24_infl <- droplevels(co_24[grp == "TypeReInflamed", ])
+
+g_co_infl_unadj_dn <- levels(droplevels(co_24_infl[est < 0, ]$Gene))
+-length(g_co_infl_unadj_dn) 
+g_co_infl_unadj_up <- levels(droplevels(co_24_infl[est > 0, ]$Gene))
+length(g_co_infl_unadj_up) 
+
+## Disease
+co_24_cd <- droplevels(co_24[grp == "IBD_diseaseCD", ])
+
+g_co_cd_unadj_dn <- levels(droplevels(co_24_cd[est < 0, ]$Gene))
+-length(g_co_cd_unadj_dn) 
+g_co_cd_unadj_up <- levels(droplevels(co_24_cd[est > 0, ]$Gene))
+length(g_co_cd_adj_up)
+
+# Adjusted
+## Inflammation
+co_25_infl <- droplevels(co_25[grp == "TypeReInflamed", ])
+
+g_co_infl_adj_dn <- levels(droplevels(co_25_infl[est < 0, ]$Gene))
+-length(g_co_infl_adj_dn) 
+g_co_infl_adj_up <- levels(droplevels(co_25_infl[est > 0, ]$Gene))
+length(g_co_infl_adj_up) 
+
+## Disease
+co_25_cd <- droplevels(co_25[grp == "IBD_diseaseCD", ])
+
+g_co_cd_adj_dn <- levels(droplevels(co_25_cd[est < 0, ]$Gene))
+-length(g_co_cd_adj_dn) 
+g_co_cd_adj_up <- levels(droplevels(co_25_cd[est > 0, ]$Gene))
+length(g_co_cd_adj_up)
+
+# Inflammation
+g_co_infl_unadj_adj_dn <- g_co_infl_unadj_dn[g_co_infl_unadj_dn %in% g_co_infl_adj_dn]
+-length(g_co_infl_unadj_adj_dn)
+g_co_infl_unadj_adj_up <- g_co_infl_unadj_dn[g_co_infl_unadj_up %in% g_co_infl_adj_up]
+length(g_co_infl_unadj_adj_up)
+
+# Disease
+g_co_cd_unadj_adj_dn <- g_co_cd_unadj_dn[g_co_cd_unadj_dn %in% g_co_cd_adj_dn]
+-length(g_co_cd_unadj_adj_dn)
+g_co_cd_unadj_adj_up <- g_co_cd_unadj_dn[g_co_cd_unadj_up %in% g_co_cd_adj_up]
+length(g_co_cd_unadj_adj_up)
+```
+
+#### Venn diagrams
+```{r}
+venn.diagram(x = list(Unadjusted = g_co_infl_unadj_dn,
+                      Adjusted = g_co_infl_adj_dn),
+             col = c("green",
+                     "red"),
+             main = "Colon: Downregulated in Inflamed vs. Non-Inflamed IBD",
+             filename = "tmp/co_infl_unadj_adj_dn.tiff",
+             units = 'in',
+             height = 5,
+             width = 5)
+
+venn.diagram(x = list(Unadjusted = g_co_infl_unadj_up,
+                      Adjusted = g_co_infl_adj_up),
+             col = c("green",
+                     "red"),
+             main = "Colon: Upregulated in Inflamed vs. Non-Inflamed IBD",
+             filename = "tmp/co_infl_unadj_adj_up.tiff",
+             units = 'in',
+             height = 5,
+             width = 5)
+
+venn.diagram(x = list(Unadjusted = g_co_cd_unadj_dn,
+                      Adjusted = g_co_cd_adj_dn),
+             col = c("green",
+                     "red"),
+             main = "Colon: Downregulated in CD vs. UC",
+             filename = "tmp/co_cd_unadj_adj_dn.tiff",
+             units = 'in',
+             height = 5,
+             width = 5)
+
+venn.diagram(x = list(Unadjusted = g_co_cd_unadj_up,
+                      Adjusted = g_co_cd_adj_up),
+             col = c("green",
+                     "red"),
+             main = "Colon: Upregulated in CD vs. UC",
+             filename = "tmp/co_cd_unadj_adj_up.tiff",
+             units = 'in',
+             height = 5,
+             width = 5)
+```
+
+### Barplot
+#### Data
+```{r}
+nsign_ibd_infl <- rbind(data.table(Model = "Unadjusted",
+                                   melt.data.table(nsign24,
+                                                   id.vars = 1)),
+                        data.table(Model = "Adjusted",
+                                   melt.data.table(nsign25,
+                                                   id.vars = 1)))
+
+nsign_ibd_infl$Model <- factor(nsign_ibd_infl$Model,
+                               levels = c("Adjusted",
+                                          "Unadjusted"))
+
+nsign_ibd_infl$grp <- factor(nsign_ibd_infl$grp,
+                             levels = c("TypeReInflamed",
+                                        "IBD_diseaseCD"),
+                             labels = c("Inflamed vs. Non-Inflamed",
+                                        "CD vs. UC"))
+nsign_ibd_infl
+```
+
+#### Figure
+```{r,fig.width=8,fig.height=4}
+fig2 <- ggplot(nsign_ibd_infl,
+               aes(x = value,
+                   y = Model,
+                   fill = Model)) +
+  facet_wrap(~ grp,
+             scale = "free_x") +
+  geom_bar(stat = "identity",
+           color = "black") +
+  geom_vline(xintercept = 0,
+             linetype = "dashed") +
+  scale_x_continuous("Number of differentially expressed lncRNAs") +
+  scale_y_discrete("") +
+  theme_bw() +
+  theme(legend.position = "none")
+
+tiff(filename = "tmp/fig2.tiff",
+     height = 4,
+     width = 8,
+     units = 'in',
+     res = 600,
+     compression = "lzw+p")
+print(fig2)
+graphics.off()
+
+fig2
+```
+
+# Save gene list
+```{r}
+gene_list <- list(g_il_uc_ni_unadj_dn = g_il_uc_ni_unadj_dn,
+                  g_il_uc_ni_unadj_up = g_il_uc_ni_unadj_up,
+                  g_il_uc_ni_adj_dn = g_il_uc_ni_adj_dn,
+                  g_il_uc_ni_adj_up = g_il_uc_ni_adj_up,
+                  g_il_uc_ni_unadj_adj_dn = g_il_uc_ni_unadj_adj_dn,
+                  g_il_uc_ni_unadj_adj_up = g_il_uc_ni_unadj_adj_up,
+                  
+                  g_il_cd_ni_unadj_dn = g_il_cd_ni_unadj_dn,
+                  g_il_cd_ni_unadj_up = g_il_cd_ni_unadj_up,
+                  g_il_cd_ni_adj_dn = g_il_cd_ni_adj_dn,
+                  g_il_cd_ni_adj_up = g_il_cd_ni_adj_up,
+                  g_il_cd_ni_unadj_adj_dn = g_il_cd_ni_unadj_adj_dn,
+                  g_il_cd_ni_unadj_adj_up = g_il_cd_ni_unadj_adj_up,
+                  
+                  g_il_cd_i_unadj_dn = g_il_cd_i_unadj_dn,
+                  g_il_cd_i_unadj_up = g_il_cd_i_unadj_up,
+                  g_il_cd_i_adj_dn = g_il_cd_i_adj_dn,
+                  g_il_cd_i_adj_up = g_il_cd_i_adj_up,
+                  g_il_cd_i_unadj_adj_dn = g_il_cd_i_unadj_adj_dn,
+                  g_il_cd_i_unadj_adj_up = g_il_cd_i_unadj_adj_up,
+                  
+                  g_re_uc_ni_unadj_dn = g_re_uc_ni_unadj_dn,
+                  g_re_uc_ni_unadj_up = g_re_uc_ni_unadj_up,
+                  g_re_uc_ni_adj_dn = g_re_uc_ni_adj_dn,
+                  g_re_uc_ni_adj_up = g_re_uc_ni_adj_up,
+                  g_re_uc_ni_unadj_adj_dn = g_re_uc_ni_unadj_adj_dn,
+                  g_re_uc_ni_unadj_adj_up = g_re_uc_ni_unadj_adj_up,
+                  
+                  g_re_cd_ni_unadj_dn = g_re_cd_ni_unadj_dn,
+                  g_re_cd_ni_unadj_up = g_re_cd_ni_unadj_up,
+                  g_re_cd_ni_adj_dn = g_re_cd_ni_adj_dn,
+                  g_re_cd_ni_adj_up = g_re_cd_ni_adj_up,
+                  g_re_cd_ni_unadj_adj_dn = g_re_cd_ni_unadj_adj_dn,
+                  g_re_cd_ni_unadj_adj_up = g_re_cd_ni_unadj_adj_up,
+                  
+                  g_re_uc_i_unadj_dn = g_re_uc_i_unadj_dn,
+                  g_re_uc_i_unadj_up = g_re_uc_i_unadj_up,
+                  g_re_uc_i_adj_dn = g_re_uc_i_adj_dn,
+                  g_re_uc_i_adj_up = g_re_uc_i_adj_up,
+                  g_re_uc_i_unadj_adj_dn = g_re_uc_i_unadj_adj_dn,
+                  g_re_uc_i_unadj_adj_up = g_re_uc_i_unadj_adj_up,
+                  
+                  g_re_cd_i_unadj_dn = g_re_cd_i_unadj_dn,
+                  g_re_cd_i_unadj_up = g_re_cd_i_unadj_up,
+                  g_re_cd_i_adj_dn = g_re_cd_i_adj_dn,
+                  g_re_cd_i_adj_up = g_re_cd_i_adj_up,
+                  g_re_cd_i_unadj_adj_dn = g_re_cd_i_unadj_adj_dn,
+                  g_re_cd_i_unadj_adj_up = g_re_cd_i_unadj_adj_up,
+                  
+                  g_co_uc_ni_unadj_dn = g_co_uc_ni_unadj_dn,
+                  g_co_uc_ni_unadj_up = g_co_uc_ni_unadj_up,
+                  g_co_uc_ni_adj_dn = g_co_uc_ni_adj_dn,
+                  g_co_uc_ni_adj_up = g_co_uc_ni_adj_up,
+                  g_co_uc_ni_unadj_adj_dn = g_co_uc_ni_unadj_adj_dn,
+                  g_co_uc_ni_unadj_adj_up = g_co_uc_ni_unadj_adj_up,
+                  
+                  g_co_cd_ni_unadj_dn = g_co_cd_ni_unadj_dn,
+                  g_co_cd_ni_unadj_up = g_co_cd_ni_unadj_up,
+                  g_co_cd_ni_adj_dn = g_co_cd_ni_adj_dn,
+                  g_co_cd_ni_adj_up = g_co_cd_ni_adj_up,
+                  g_co_cd_ni_unadj_adj_dn = g_co_cd_ni_unadj_adj_dn,
+                  g_co_cd_ni_unadj_adj_up = g_co_cd_ni_unadj_adj_up,
+                  
+                  g_co_uc_i_unadj_dn = g_co_uc_i_unadj_dn,
+                  g_co_uc_i_unadj_up = g_co_uc_i_unadj_up,
+                  g_co_uc_i_adj_dn = g_co_uc_i_adj_dn,
+                  g_co_uc_i_adj_up = g_co_uc_i_adj_up,
+                  g_co_uc_i_unadj_adj_dn = g_co_uc_i_unadj_adj_dn,
+                  g_co_uc_i_unadj_adj_up = g_co_uc_i_unadj_adj_up,
+                  
+                  g_co_cd_i_unadj_dn = g_co_cd_i_unadj_dn,
+                  g_co_cd_i_unadj_up = g_co_cd_i_unadj_up,
+                  g_co_cd_i_adj_dn = g_co_cd_i_adj_dn,
+                  g_co_cd_i_adj_up = g_co_cd_i_adj_up,
+                  g_co_cd_i_unadj_adj_dn = g_co_cd_i_unadj_adj_dn,
+                  g_co_cd_i_unadj_adj_up = g_co_cd_i_unadj_adj_up,
+                  
+                  g_co_infl_unadj_dn = g_co_infl_unadj_dn,
+                  g_co_infl_unadj_up = g_co_infl_unadj_up,
+                  g_co_cd_unadj_dn = g_co_cd_unadj_dn,
+                  g_co_cd_unadj_up = g_co_cd_unadj_up,
+                  g_co_infl_adj_dn = g_co_infl_adj_dn,
+                  g_co_infl_adj_up = g_co_infl_adj_up,
+                  
+                  g_co_cd_adj_dn = g_co_cd_adj_dn,
+                  g_co_cd_adj_up = g_co_cd_adj_up,
+                  g_co_infl_unadj_adj_dn = g_co_infl_unadj_adj_dn,
+                  g_co_infl_unadj_adj_up = g_co_infl_unadj_adj_up)
+
+save(gene_list,
+     file = "tmp/gene_list_07192022_alpha005.RData")
+```
+
+# PART IV: Inflamed Samples Only
+**RELOAD THE PROJECT**
+# Reload data
+```{r}
+load("Data/dt1l.RData")
+load("Data/gene_list_07192022_alpha005.RData")
+```
+
+# Functions
+```{r}
+foo51 <- function(logTPM,
+                  Batch,
+                  IBD_severity_4levels) {
+  
+  dt <- data.frame(logTPM = logTPM,
+                   Batch = Batch,
+                   IBD_severity_4levels = IBD_severity_4levels)
+  
+  m1 <- try({
+    lme.zig(fixed = logTPM ~ IBD_severity_4levels,
+            random = ~ 1| Batch,
+            zi_fixed = ~ IBD_severity_4levels,
+            data = dt,
+            verbose = FALSE)
+  })
+  if(class(m1)[1] == "try-error") {
+    m2 <- try({
+      lme(fixed = logTPM ~ IBD_severity_4levels,
+          random = ~ 1| Batch,
+          data = dt)
+    })
+    
+    if (class(m2)[1] == "try-error") {
+      return(NA)
+    } else {
+      return(fixed(m2))
+    }
+  } else {
+    return(fixed(m1))
+  }
+}
+
+foo52 <- function(logTPM,
+                  Batch,
+                  IBD_severity_4levels,
+                  Disease_Duration_Categoric,
+                  Medications) {
+  
+  dt <- data.frame(logTPM = logTPM,
+                   Batch = Batch,
+                   IBD_severity_4levels = IBD_severity_4levels,
+                   Disease_Duration_Categoric = Disease_Duration_Categoric,
+                   Medications = Medications)
+  
+  m1 <- try({
+    lme.zig(fixed = logTPM ~ IBD_severity_4levels +
+              Disease_Duration_Categoric +
+              Medications,
+            random = ~ 1| Batch,
+            zi_fixed = ~ IBD_severity_4levels +
+              Disease_Duration_Categoric +
+              Medications,
+            data = dt,
+            verbose = FALSE)
+  })
+  if(class(m1)[1] == "try-error") {
+    m2 <- try({
+      lme(fixed = logTPM ~ IBD_severity_4levels +
+            Disease_Duration_Categoric +
+            Medications,
+          random = ~ 1| Batch,
+          data = dt)
+    })
+    
+    if (class(m2)[1] == "try-error") {
+      return(NA)
+    } else {
+      return(fixed(m2))
+    }
+  } else {
+    return(fixed(m1))
+  }
+}
+
+foo61 <- function(logTPM,
+                  Batch,
+                  GRID,
+                  IBD_severity_4levels) {
+  
+  dt <- data.frame(logTPM = logTPM,
+                   Batch = Batch,
+                   GRID = GRID,
+                   IBD_severity_4levels = IBD_severity_4levels)
+  
+  m1 <- try({
+    lme.zig(fixed = logTPM ~ IBD_severity_4levels,
+            random = list(~ 1| Batch,
+                          ~ 1| GRID),
+            zi_fixed = ~ IBD_severity_4levels,
+            data = dt,
+            verbose = FALSE)
+  })
+  if(class(m1)[1] == "try-error") {
+    m2 <- try({
+      lme(fixed = logTPM ~ IBD_severity_4levels,
+          random = list(~ 1| Batch,
+                        ~ 1| GRID),
+          data = dt)
+    })
+    
+    if (class(m2)[1] == "try-error") {
+      return(NA)
+    } else {
+      return(fixed(m2))
+    }
+  } else {
+    return(fixed(m1))
+  }
+}
+
+foo62 <- function(logTPM,
+                  Batch,
+                  GRID,
+                  IBD_severity_4levels,
+                  Disease_Duration_Categoric,
+                  Medications) {
+  
+  dt <- data.frame(logTPM = logTPM,
+                   Batch = Batch,
+                   GRID = GRID,
+                   IBD_severity_4levels = IBD_severity_4levels,
+                   Disease_Duration_Categoric = Disease_Duration_Categoric,
+                   Medications = Medications)
+  
+  m1 <- try({
+    lme.zig(fixed = logTPM ~ IBD_severity_4levels +
+              Disease_Duration_Categoric +
+              Medications,
+            random = list(~ 1| Batch,
+                          ~ 1| GRID),
+            zi_fixed = ~ IBD_severity_4levels +
+              Disease_Duration_Categoric +
+              Medications,
+            data = dt,
+            verbose = FALSE)
+  })
+  if(class(m1)[1] == "try-error") {
+    m2 <- try({
+      lme(fixed = logTPM ~ IBD_severity_4levels +
+            Disease_Duration_Categoric +
+            Medications,
+          random = list(~ 1| Batch,
+                        ~ 1| GRID),
+          data = dt)
+    })
+    
+    if (class(m2)[1] == "try-error") {
+      return(NA)
+    } else {
+      return(fixed(m2))
+    }
+  } else {
+    return(fixed(m1))
+  }
+}
+```
+
+# Inflamed Ileum
+## CD
+### Data
+```{r}
+i_cd_i <- droplevels(dt1l[Gene %in% c(gene_list$g_co_cd_i_unadj_adj_dn,
+                                      gene_list$g_co_cd_i_unadj_adj_up) &
+                            dt1l$TypeRe == "Inflamed" &
+                            dt1l$RegionRe_3cat == "Ileum" &
+                            dt1l$IBD_disease == "CD", ])
+nlevels(i_cd_i$Gene)
+nlevels(i_cd_i$GRID)
+```
+
+### Severity only
+#### Run
+```{r, warning=FALSE,message=FALSE,error=FALSE}
+system.time({
+  res51 <- i_cd_i[, .(out = list(foo51(logTPM,
+                                       Extraction_Batch_phase1_and_phase2_UPDATED,
+                                       IBD_severity_4levels))),
+                  by = Gene]
+})
+
+# user  system elapsed 
+# 54.4     1.0    55.9  
+```
+
+#### p-values
+```{r}
+pvals <- list()
+for (j in 1:length(res51$Gene)) {
+  if (!is.na(res51$out[[j]][1])) {
+    pvals[[j]] <- data.table(Gene = res51$Gene[j],
+                             grp = rownames(res51$out[[j]]$dist)[-1],
+                             est = res51$out[[j]]$dist[-1, 1],
+                             pval = res51$out[[j]]$dist[-1, 3])
+  }
+}
+pvals_i_i_cd_sev <- rbindlist(pvals)
+```
+
+#### Adjusted p-values
+```{r}
+pvals_i_i_cd_sev$adj_pval <- p.adjust(pvals_i_i_cd_sev$pval,
+                             method = "fdr")
+hist(pvals_i_i_cd_sev$pval)
+
+head(pvals_i_i_cd_sev)
+hist(pvals_i_i_cd_sev$adj_pval)
+```
+
+### Severity, duration and medications
+#### Run
+```{r}
+system.time({
+  res52 <- i_cd_i[, .(out = list(foo52(logTPM,
+                                       Extraction_Batch_phase1_and_phase2_UPDATED,
+                                       IBD_severity_4levels,
+                                       Disease_Duration_Categoric,
+                                       Medications))),
+                  by = Gene]
+})
+
+# user  system elapsed 
+# 98.04    1.03   99.64
+```
+
+#### p-values
+```{r, warning=FALSE}
+pvals <- list()
+for (j in 1:length(res52$Gene)) {
+  if (!is.na(res52$out[[j]][1])) {
+    pvals[[j]] <- data.table(Gene = res52$Gene[j],
+                             grp = rownames(res52$out[[j]]$dist)[-1],
+                             est = res52$out[[j]]$dist[-1, 1],
+                             pval = res52$out[[j]]$dist[-1, 3])
+  }
+}
+pvals_i_i_cd_dur_med <- rbindlist(pvals)
+```
+
+#### Adjusted p-values
+```{r}
+pvals_i_i_cd_dur_med$adj_pval <- p.adjust(pvals_i_i_cd_dur_med$pval,
+                             method = "fdr")
+hist(pvals_i_i_cd_dur_med$pval)
+
+head(pvals_i_i_cd_dur_med)
+hist(pvals_i_i_cd_dur_med$adj_pval)
+```
+
+# Inflamed Colon
+## UC
+### Data
+```{r}
+c_uc_i <- droplevels(dt1l[Gene %in% c(gene_list$g_co_uc_i_unadj_adj_dn,
+                                      gene_list$g_co_uc_i_unadj_adj_up) &
+                            dt1l$TypeRe == "Inflamed" &
+                            dt1l$RegionRe_3cat == "colon_nonRectum" &
+                            dt1l$IBD_disease == "UC", ])
+nlevels(c_uc_i$Gene)
+nlevels(c_uc_i$GRID)
+```
+### Severity only
+#### Run
+```{r, warning=FALSE,message=FALSE,error=FALSE}
+system.time({
+  res61 <- c_uc_i[, .(out = list(foo61(logTPM,
+                                       Extraction_Batch_phase1_and_phase2_UPDATED,
+                                       GRID,
+                                       IBD_severity_4levels))),
+                  by = Gene]
+})
+
+# user  system elapsed 
+# 307.54    3.72  312.91  
+```
+
+#### p-values
+```{r}
+pvals <- list()
+for (j in 1:length(res61$Gene)) {
+  if (!is.na(res61$out[[j]][1])) {
+    pvals[[j]] <- data.table(Gene = res61$Gene[j],
+                             grp = rownames(res61$out[[j]]$dist)[-1],
+                             est = res61$out[[j]]$dist[-1, 1],
+                             pval = res61$out[[j]]$dist[-1, 3])
+  }
+}
+pvals_c_i_uc_sev <- rbindlist(pvals)
+```
+
+#### Adjusted p-values
+```{r}
+pvals_c_i_uc_sev$adj_pval <- p.adjust(pvals_c_i_uc_sev$pval,
+                             method = "fdr")
+hist(pvals_c_i_uc_sev$pval)
+
+head(pvals_c_i_uc_sev)
+hist(pvals_c_i_uc_sev$adj_pval)
+```
+
+### Severity, duration and medications
+#### Run
+```{r}
+system.time({
+  res62 <- c_uc_i[, .(out = list(foo62(logTPM,
+                                       Extraction_Batch_phase1_and_phase2_UPDATED,
+                                       GRID,
+                                       IBD_severity_4levels,
+                                       Disease_Duration_Categoric,
+                                       Medications))),
+                  by = Gene]
+})
+
+# user  system elapsed 
+# 356.08    3.47  359.95 
+```
+
+#### p-values
+```{r, warning=FALSE}
+pvals <- list()
+for (j in 1:length(res62$Gene)) {
+  if (!is.na(res62$out[[j]][1])) {
+    pvals[[j]] <- data.table(Gene = res62$Gene[j],
+                             grp = rownames(res62$out[[j]]$dist)[-1],
+                             est = res62$out[[j]]$dist[-1, 1],
+                             pval = res62$out[[j]]$dist[-1, 3])
+  }
+}
+pvals_c_i_uc_sev_dur_med <- rbindlist(pvals)
+```
+
+#### Adjusted p-values
+```{r}
+pvals_c_i_uc_sev_dur_med$adj_pval <- p.adjust(pvals_c_i_uc_sev_dur_med$pval,
+                                              method = "fdr")
+hist(pvals_c_i_uc_sev_dur_med$pval)
+
+head(pvals_c_i_uc_sev_dur_med)
+hist(pvals_c_i_uc_sev_dur_med$adj_pval)
+```
+
+## CD
+### Data
+```{r}
+c_cd_i <- droplevels(dt1l[Gene %in% c(gene_list$g_co_cd_i_unadj_adj_dn,
+                                      gene_list$g_co_cd_i_unadj_adj_up) &
+                            dt1l$TypeRe == "Inflamed" &
+                            dt1l$RegionRe_3cat == "colon_nonRectum" &
+                            dt1l$IBD_disease == "CD", ])
+nlevels(c_cd_i$Gene)
+nlevels(c_cd_i$GRID)
+```
+
+### Severity only
+#### Run
+```{r, warning=FALSE,message=FALSE,error=FALSE}
+system.time({
+  res61 <- c_cd_i[, .(out = list(foo61(logTPM,
+                                       Extraction_Batch_phase1_and_phase2_UPDATED,
+                                       GRID,
+                                       IBD_severity_4levels))),
+                  by = Gene]
+})
+
+# user  system elapsed 
+# 188.30    1.51  189.98
+```
+
+#### p-values
+```{r}
+pvals <- list()
+for (j in 1:length(res61$Gene)) {
+  if (!is.na(res61$out[[j]][1])) {
+    pvals[[j]] <- data.table(Gene = res61$Gene[j],
+                             grp = rownames(res61$out[[j]]$dist)[-1],
+                             est = res61$out[[j]]$dist[-1, 1],
+                             pval = res61$out[[j]]$dist[-1, 3])
+  }
+}
+pvals_c_i_cd_sev <- rbindlist(pvals)
+```
+
+#### Adjusted p-values
+```{r}
+pvals_c_i_cd_sev$adj_pval <- p.adjust(pvals_c_i_cd_sev$pval,
+                                      method = "fdr")
+hist(pvals_c_i_cd_sev$pval)
+
+head(pvals_c_i_cd_sev)
+hist(pvals_c_i_cd_sev$adj_pval)
+```
+
+### Severity, duration and medications
+#### Run
+```{r}
+system.time({
+  res62 <- c_cd_i[, .(out = list(foo62(logTPM,
+                                       Extraction_Batch_phase1_and_phase2_UPDATED,
+                                       GRID,
+                                       IBD_severity_4levels,
+                                       Disease_Duration_Categoric,
+                                       Medications))),
+                  by = Gene]
+})
+
+# user  system elapsed 
+#224.41    2.07  226.58 
+```
+
+#### p-values
+```{r, warning=FALSE}
+pvals <- list()
+for (j in 1:length(res62$Gene)) {
+  if (!is.na(res62$out[[j]][1])) {
+    pvals[[j]] <- data.table(Gene = res62$Gene[j],
+                             grp = rownames(res62$out[[j]]$dist)[-1],
+                             est = res62$out[[j]]$dist[-1, 1],
+                             pval = res62$out[[j]]$dist[-1, 3])
+  }
+}
+pvals_c_i_cd_dur_med <- rbindlist(pvals)
+```
+
+#### Adjusted p-values
+```{r}
+pvals_c_i_cd_dur_med$adj_pval <- p.adjust(pvals_c_i_cd_dur_med$pval,
+                             method = "fdr")
+hist(pvals_c_i_cd_dur_med$pval)
+
+head(pvals_c_i_cd_dur_med)
+hist(pvals_c_i_cd_dur_med$adj_pval)
+```
+
+# Inflamed Rectum
+## UC
+### Data
+```{r}
+r_uc_i <- droplevels(dt1l[Gene %in% c(gene_list$g_re_uc_i_unadj_adj_dn,
+                                      gene_list$g_re_uc_i_unadj_adj_up) &
+                            dt1l$TypeRe == "Inflamed" &
+                            dt1l$RegionRe_3cat == "Rectum" &
+                            dt1l$IBD_disease == "UC", ])
+nlevels(r_uc_i$Gene)
+nlevels(r_uc_i$GRID)
+```
+### Severity only
+#### Run
+```{r, warning=FALSE,message=FALSE,error=FALSE}
+system.time({
+  res51 <- r_uc_i[, .(out = list(foo51(logTPM,
+                                       Extraction_Batch_phase1_and_phase2_UPDATED,
+                                       IBD_severity_4levels))),
+                  by = Gene]
+})
+
+# user  system elapsed 
+# 162.32    2.28  165.12  
+```
+
+#### p-values
+```{r}
+pvals <- list()
+for (j in 1:length(res51$Gene)) {
+  if (!is.na(res51$out[[j]][1])) {
+    pvals[[j]] <- data.table(Gene = res51$Gene[j],
+                             grp = rownames(res51$out[[j]]$dist)[-1],
+                             est = res51$out[[j]]$dist[-1, 1],
+                             pval = res51$out[[j]]$dist[-1, 3])
+  }
+}
+pvals_r_i_uc_sev <- rbindlist(pvals)
+```
+
+#### Adjusted p-values
+```{r}
+pvals_r_i_uc_sev$adj_pval <- p.adjust(pvals_r_i_uc_sev$pval,
+                                      method = "fdr")
+hist(pvals_r_i_uc_sev$pval)
+
+head(pvals_r_i_uc_sev)
+hist(pvals_r_i_uc_sev$adj_pval)
+```
+
+### Severity, duration and medications
+#### Run
+```{r}
+system.time({
+  res52 <- r_uc_i[, .(out = list(foo52(logTPM,
+                                       Extraction_Batch_phase1_and_phase2_UPDATED,
+                                       IBD_severity_4levels,
+                                       Disease_Duration_Categoric,
+                                       Medications))),
+                  by = Gene]
+})
+
+# user  system elapsed 
+# 190.56    2.46  193.81 
+```
+
+#### p-values
+```{r, warning=FALSE}
+pvals <- list()
+for (j in 1:length(res52$Gene)) {
+  if (!is.na(res52$out[[j]][1])) {
+    pvals[[j]] <- data.table(Gene = res52$Gene[j],
+                             grp = rownames(res52$out[[j]]$dist)[-1],
+                             est = res52$out[[j]]$dist[-1, 1],
+                             pval = res52$out[[j]]$dist[-1, 3])
+  }
+}
+pvals_r_i_uc_dur_med <- rbindlist(pvals)
+```
+
+#### Adjusted p-values
+```{r}
+pvals_r_i_uc_dur_med$adj_pval <- p.adjust(pvals_r_i_uc_dur_med$pval,
+                                          method = "fdr")
+hist(pvals_r_i_uc_dur_med$pval)
+
+head(pvals_r_i_uc_dur_med)
+hist(pvals_r_i_uc_dur_med$adj_pval)
+```
+
+## CD
+### Data
+```{r}
+r_cd_i <- droplevels(dt1l[Gene %in% c(gene_list$g_re_cd_i_unadj_adj_dn,
+                                      gene_list$g_re_cd_i_unadj_adj_up) &
+                            dt1l$TypeRe == "Inflamed" &
+                            dt1l$RegionRe_3cat == "Rectum" &
+                            dt1l$IBD_disease == "CD", ])
+nlevels(r_cd_i$Gene)
+nlevels(r_cd_i$GRID)
+```
+
+### Severity only
+#### Run
+```{r, warning=FALSE,message=FALSE,error=FALSE}
+system.time({
+  res51 <- r_cd_i[, .(out = list(foo51(logTPM,
+                                       Extraction_Batch_phase1_and_phase2_UPDATED,
+                                       IBD_severity_4levels))),
+                  by = Gene]
+})
+
+# user  system elapsed 
+# 79.21    1.15   81.69 
+```
+
+#### p-values
+```{r}
+pvals <- list()
+for (j in 1:length(res51$Gene)) {
+  if (!is.na(res51$out[[j]][1])) {
+    pvals[[j]] <- data.table(Gene = res51$Gene[j],
+                             grp = rownames(res51$out[[j]]$dist)[-1],
+                             est = res51$out[[j]]$dist[-1, 1],
+                             pval = res51$out[[j]]$dist[-1, 3])
+  }
+}
+pvals_r_i_cd_sev <- rbindlist(pvals)
+```
+
+#### Adjusted p-values
+```{r}
+pvals_r_i_cd_sev$adj_pval <- p.adjust(pvals_r_i_cd_sev$pval,
+                                      method = "fdr")
+hist(pvals_r_i_cd_sev$pval)
+
+head(pvals_r_i_cd_sev)
+hist(pvals_r_i_cd_sev$adj_pval)
+```
+
+### Severity, duration and medications
+#### Run
+```{r}
+system.time({
+  res52 <- r_cd_i[, .(out = list(foo52(logTPM,
+                                       Extraction_Batch_phase1_and_phase2_UPDATED,
+                                       IBD_severity_4levels,
+                                       Disease_Duration_Categoric,
+                                       Medications))),
+                  by = Gene]
+})
+
+# user  system elapsed 
+# 118.28    1.66  120.05 
+```
+
+#### p-values
+```{r, warning=FALSE}
+pvals <- list()
+for (j in 1:length(res52$Gene)) {
+  if (!is.na(res52$out[[j]][1])) {
+    pvals[[j]] <- data.table(Gene = res52$Gene[j],
+                             grp = rownames(res52$out[[j]]$dist)[-1],
+                             est = res52$out[[j]]$dist[-1, 1],
+                             pval = res52$out[[j]]$dist[-1, 3])
+  }
+}
+pvals_r_i_cd_dur_med <- rbindlist(pvals)
+```
+
+#### Adjusted p-values
+```{r}
+pvals_r_i_cd_dur_med$adj_pval <- p.adjust(pvals_r_i_cd_dur_med$pval,
+                                          method = "fdr")
+hist(pvals_r_i_cd_dur_med$pval)
+
+head(pvals_r_i_cd_dur_med)
+hist(pvals_r_i_cd_dur_med$adj_pval)
+```
+
+# Save tables
+```{r}
+pvals_sev <- list(pvals_i_i_cd_sev,
+                  pvals_i_i_cd_dur_med,
+                  
+                  pvals_c_i_uc_sev = pvals_c_i_uc_sev,
+                  pvals_c_i_uc_sev_dur_med = pvals_c_i_uc_sev_dur_med,
+                  pvals_c_i_cd_sev = pvals_c_i_cd_sev,
+                  pvals_c_i_cd_dur_med = pvals_c_i_cd_dur_med,
+                  
+                  pvals_r_i_uc_sev,
+                  pvals_r_i_uc_dur_med,
+                  pvals_r_i_cd_sev,
+                  pvals_r_i_cd_dur_med)
+
+save(pvals_sev,
+     file = "tmp/pvals_sev.RData")
+```
+
+# Session
+```{r}
+sessionInfo()
+```
